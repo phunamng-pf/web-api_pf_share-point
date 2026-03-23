@@ -1,12 +1,17 @@
 using Microsoft.Extensions.Options;
 using SharePoint.Application.Abstractions;
-using SharePoint.Infrastructure.Options;
+using SharePoint.Domain.Common;
 
 namespace SharePoint.Infrastructure.Storage;
 
-public sealed class LocalFileStorage(IOptions<StorageOptions> options) : IFileStorage
+public sealed class LocalFileStorage : IFileStorage
 {
-    private readonly string _rootPath = Path.GetFullPath(options.Value.RootPath);
+    private readonly string _rootPath;
+
+    public LocalFileStorage(IOptions<StorageOptions> options)
+    {
+        _rootPath = Path.GetFullPath(options.Value.RootPath);
+    }
 
     public async Task<string> SaveAsync(Stream fileStream, string extension, CancellationToken cancellationToken)
     {

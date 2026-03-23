@@ -11,6 +11,8 @@ public sealed class FileItem : AuditableEntity
     public required string ContentType { get; set; }
     public long SizeInBytes { get; set; }
     public Guid? ParentFolderId { get; set; }
+    public Folder? ParentFolder { get; set; }
     public Guid CreatedByUserId { get; set; }
+    public Guid? ModifiedByUserId { get; set; }
     public bool IsDeleted { get; set; }
 }

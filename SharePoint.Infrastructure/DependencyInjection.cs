@@ -1,8 +1,9 @@
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using SharePoint.Application.Abstractions;
+using SharePoint.Domain.Common;
 using SharePoint.Infrastructure.Identity;
-using SharePoint.Infrastructure.Options;
 using SharePoint.Infrastructure.Persistence;
 using SharePoint.Infrastructure.Storage;
 
@@ -14,10 +15,19 @@ public static class DependencyInjection
     {
         services.Configure<StorageOptions>(configuration.GetSection(StorageOptions.SectionName));
 
-        services.AddSingleton<IFolderRepository, InMemoryFolderRepository>();
-        services.AddSingleton<IFileRepository, InMemoryFileRepository>();
-        services.AddSingleton<IUserContext, TrainingUserContext>();
-        services.AddSingleton<IFileStorage, LocalFileStorage>();
+        var connectionString = configuration.GetConnectionString("DefaultConnection")
+            ?? throw new InvalidOperationException("Connection string 'DefaultConnection' is not configured.");
+
+        services.AddDbContext<AppDbContext>(options =>
+            options.UseSqlServer(connectionString));
+
+        services.AddHttpContextAccessor();
+
+        services.AddScoped<IFolderRepository, FolderRepository>();
+        services.AddScoped<IFileRepository, FileRepository>();
+        services.AddScoped<IUserRepository, UserRepository>();
+        services.AddScoped<IUserContext, HttpUserContext>();
+        services.AddScoped<IFileStorage, LocalFileStorage>();
 
         return services;
     }

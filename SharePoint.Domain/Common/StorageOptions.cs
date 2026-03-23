@@ -1,4 +1,4 @@
-namespace SharePoint.Infrastructure.Options;
+namespace SharePoint.Domain.Common;
 
 public sealed class StorageOptions
 {
