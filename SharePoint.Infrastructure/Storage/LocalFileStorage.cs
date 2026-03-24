@@ -4,7 +4,7 @@ using SharePoint.Domain.Common;
 
 namespace SharePoint.Infrastructure.Storage;
 
-public sealed class LocalFileStorage : IFileStorage
+public class LocalFileStorage : IFileStorage
 {
     private readonly string _rootPath;
 

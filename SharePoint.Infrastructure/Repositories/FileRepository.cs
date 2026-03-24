@@ -4,7 +4,7 @@ using SharePoint.Domain.Entities;
 
 namespace SharePoint.Infrastructure.Persistence;
 
-public sealed class FileRepository : IFileRepository
+public class FileRepository : IFileRepository
 {
     private readonly AppDbContext _dbContext;
 
@@ -26,12 +26,27 @@ public sealed class FileRepository : IFileRepository
             .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
     }
 
+    public async Task<IReadOnlyCollection<FileItem>> GetByUserAsync(Guid userId, CancellationToken cancellationToken)
+    {
+        return await _dbContext.Files
+            .Where(x => x.CreatedByUserId == userId)
+            .OrderBy(x => x.Name)
+            .ToArrayAsync(cancellationToken);
+    }
+
     public async Task<IReadOnlyCollection<FileItem>> GetByFolderAsync(Guid? parentFolderId, CancellationToken cancellationToken)
     {
         return await _dbContext.Files
             .Where(x => x.ParentFolderId == parentFolderId)
             .OrderBy(x => x.Name)
             .ToArrayAsync(cancellationToken);
+    }
+
+    public async Task<FileItem> UpdateAsync(FileItem file, CancellationToken cancellationToken)
+    {
+        _dbContext.Files.Update(file);
+        await _dbContext.SaveChangesAsync(cancellationToken);
+        return file;
     }
 
     public async Task SoftDeleteAsync(Guid id, CancellationToken cancellationToken)

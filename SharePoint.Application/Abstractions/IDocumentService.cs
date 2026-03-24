@@ -1,8 +1,9 @@
 using SharePoint.Application.Contracts;
+using SharePoint.Application.Contracts.Response;
 
 namespace SharePoint.Application.Abstractions;
 
 public interface IDocumentService
 {
-    Task<DocumentsResponse> GetDocumentsAsync(Guid? parentId, CancellationToken cancellationToken);
+    Task<FolderTreeDto> GetMyDocumentsAsync(CancellationToken cancellationToken);
 }

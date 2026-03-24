@@ -2,7 +2,7 @@ using SharePoint.Domain.Common;
 
 namespace SharePoint.Domain.Entities;
 
-public sealed class AppUser : AuditableEntity
+public class AppUser : AuditableEntity
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     public required string AzureAdObjectId { get; set; }

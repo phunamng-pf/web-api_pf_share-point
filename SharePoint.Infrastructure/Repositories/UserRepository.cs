@@ -4,7 +4,7 @@ using SharePoint.Domain.Entities;
 
 namespace SharePoint.Infrastructure.Persistence;
 
-public sealed class UserRepository : IUserRepository
+public class UserRepository : IUserRepository
 {
     private readonly AppDbContext _dbContext;
 

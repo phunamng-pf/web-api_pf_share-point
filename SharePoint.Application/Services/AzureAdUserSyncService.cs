@@ -4,7 +4,7 @@ using SharePoint.Domain.Entities;
 
 namespace SharePoint.Application.Services;
 
-public sealed class AzureAdUserSyncService : IAzureAdUserSyncService
+public class AzureAdUserSyncService : IAzureAdUserSyncService
 {
     private readonly IUserRepository _userRepository;
 

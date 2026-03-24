@@ -1,9 +1,10 @@
 using SharePoint.Application.Abstractions;
 using SharePoint.Application.Contracts;
+using SharePoint.Application.Contracts.Response;
 
 namespace SharePoint.Application.Services;
 
-public sealed class DocumentService : IDocumentService
+public class DocumentService : IDocumentService
 {
     private readonly IFolderRepository _folderRepository;
     private readonly IFileRepository _fileRepository;
@@ -19,28 +20,86 @@ public sealed class DocumentService : IDocumentService
         _userContext = userContext;
     }
 
-    public async Task<DocumentsResponse> GetDocumentsAsync(Guid? parentId, CancellationToken cancellationToken)
+    public async Task<FolderTreeDto> GetMyDocumentsAsync(CancellationToken cancellationToken)
     {
-        if (parentId.HasValue)
+        var userFolders = await _folderRepository.GetByUserAsync(_userContext.UserId, cancellationToken);
+        var userFiles = await _fileRepository.GetByUserAsync(_userContext.UserId, cancellationToken);
+
+        return BuildRootFolder(userFolders, userFiles);
+    }
+
+    private FolderTreeDto BuildRootFolder(IReadOnlyCollection<Domain.Entities.Folder> folders, IReadOnlyCollection<Domain.Entities.FileItem> files)
+    {
+        var folderLookup = folders.ToLookup(x => x.ParentId);
+        var fileLookup = files.ToLookup(x => x.ParentFolderId);
+
+        var rootFiles = fileLookup[null]
+            .OrderBy(x => x.Name)
+            .Select(MapFile)
+            .ToArray();
+
+        var rootFolders = folderLookup[null]
+            .OrderBy(x => x.Name)
+            .Select(x => BuildFolderTree(x, folderLookup, fileLookup))
+            .ToArray();
+
+        return new FolderTreeDto
         {
-            var parentFolder = await _folderRepository.GetByIdAsync(parentId.Value, cancellationToken)
-                               ?? throw new FileNotFoundException($"Folder '{parentId.Value}' not found.");
+            Id = "root",
+            Name = "Documents",
+            Files = rootFiles,
+            SubFolders = rootFolders,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = _userContext.UserId.ToString(),
+            ModifiedAt = null,
+            ModifiedBy = null,
+            ParentId = null
+        };
+    }
 
-            if (parentFolder.CreatedByUserId != _userContext.UserId)
-                throw new UnauthorizedAccessException("You do not have permission to access this folder.");
-        }
-
-        var folders = await _folderRepository.GetChildrenAsync(parentId, cancellationToken);
-        var files = await _fileRepository.GetByFolderAsync(parentId, cancellationToken);
-
-        var folderDtos = folders
-            .Select(f => new FolderDto(f.Id, f.Name, f.ParentId, f.CreatedAtUtc))
+    private static FolderTreeDto BuildFolderTree(
+        Domain.Entities.Folder folder,
+        ILookup<Guid?, Domain.Entities.Folder> folderLookup,
+        ILookup<Guid?, Domain.Entities.FileItem> fileLookup)
+    {
+        var childFiles = fileLookup[folder.Id]
+            .OrderBy(x => x.Name)
+            .Select(MapFile)
             .ToArray();
 
-        var fileDtos = files
-            .Select(f => new FileItemDto(f.Id, f.Name, f.Extension, f.ContentType, f.SizeInBytes, f.ParentFolderId, f.CreatedAtUtc))
+        var childFolders = folderLookup[folder.Id]
+            .OrderBy(x => x.Name)
+            .Select(x => BuildFolderTree(x, folderLookup, fileLookup))
             .ToArray();
 
-        return new DocumentsResponse(folderDtos, fileDtos);
+        return new FolderTreeDto
+        {
+            Id = folder.Id.ToString(),
+            Name = folder.Name,
+            Files = childFiles,
+            SubFolders = childFolders,
+            CreatedAt = folder.CreatedAtUtc,
+            CreatedBy = folder.CreatedByUserId.ToString(),
+            ModifiedAt = folder.ModifiedAtUtc,
+            ModifiedBy = folder.ModifiedByUserId?.ToString(),
+            ParentId = folder.ParentId?.ToString()
+        };
+    }
+
+    private static FileItemViewDto MapFile(Domain.Entities.FileItem file)
+    {
+        return new FileItemViewDto
+        {
+            Id = file.Id.ToString(),
+            Name = file.Name,
+            Extension = file.Extension,
+            ContentType = file.ContentType,
+            SizeInBytes = file.SizeInBytes,
+            CreatedAt = file.CreatedAtUtc,
+            CreatedBy = file.CreatedByUserId.ToString(),
+            ModifiedAt = file.ModifiedAtUtc,
+            ModifiedBy = file.ModifiedByUserId?.ToString(),
+            ParentFolderId = file.ParentFolderId?.ToString()
+        };
     }
 }

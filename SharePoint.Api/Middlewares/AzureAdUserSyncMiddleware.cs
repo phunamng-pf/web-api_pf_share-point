@@ -3,7 +3,7 @@ using SharePoint.Infrastructure.Identity;
 
 namespace SharePoint.Api.Middlewares;
 
-public sealed class AzureAdUserSyncMiddleware
+public class AzureAdUserSyncMiddleware
 {
     private readonly RequestDelegate _next;
 

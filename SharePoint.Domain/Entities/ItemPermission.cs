@@ -2,7 +2,7 @@ using SharePoint.Domain.Enums;
 
 namespace SharePoint.Domain.Entities;
 
-public sealed class ItemPermission
+public class ItemPermission
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid UserId { get; set; }

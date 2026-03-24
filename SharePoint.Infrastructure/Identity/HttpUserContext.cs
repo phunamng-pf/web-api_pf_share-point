@@ -4,7 +4,7 @@ using SharePoint.Domain.Entities;
 
 namespace SharePoint.Infrastructure.Identity;
 
-public sealed class HttpUserContext : IUserContext
+public class HttpUserContext : IUserContext
 {
     public const string UserItemKey = "CurrentUser";
 

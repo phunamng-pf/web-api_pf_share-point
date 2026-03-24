@@ -1,10 +1,12 @@
 using SharePoint.Application.Abstractions;
 using SharePoint.Application.Contracts;
+using SharePoint.Application.Contracts.Request;
+using SharePoint.Application.Contracts.Response;
 using SharePoint.Domain.Entities;
 
 namespace SharePoint.Application.Services;
 
-public sealed class FileService : IFileService
+public class FileService : IFileService
 {
     private readonly IFolderRepository _folderRepository;
     private readonly IFileRepository _fileRepository;
@@ -23,8 +25,42 @@ public sealed class FileService : IFileService
         _userContext = userContext;
     }
 
-    public async Task<FileItemDto> UploadFileAsync(UploadFileRequest request, CancellationToken cancellationToken)
+    public async Task<FileItemViewDto> CreateFileMetadataAsync(ReqCreateFileDto request, CancellationToken cancellationToken)
     {
+        if (string.IsNullOrWhiteSpace(request.Name))
+        {
+            throw new ArgumentException("File name is required.", nameof(request.Name));
+        }
+
+        if (string.IsNullOrWhiteSpace(request.Extension))
+        {
+            throw new ArgumentException("File extension is required.", nameof(request.Extension));
+        }
+
+        await ValidateParentFolderAccessAsync(request.ParentFolderId, cancellationToken);
+
+        var normalizedExtension = request.Extension.StartsWith('.')
+            ? request.Extension
+            : $".{request.Extension}";
+
+        var file = new FileItem
+        {
+            Name = request.Name.Trim(),
+            Extension = normalizedExtension.Trim(),
+            StoragePath = string.Empty,
+            ContentType = "application/octet-stream",
+            SizeInBytes = 0,
+            ParentFolderId = request.ParentFolderId,
+            CreatedByUserId = _userContext.UserId
+        };
+
+        var saved = await _fileRepository.AddAsync(file, cancellationToken);
+        return MapFile(saved);
+    }
+
+    public async Task<FileItemViewDto> UploadFileAsync(ReqUploadFileDto request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
         if (string.IsNullOrWhiteSpace(request.FileName))
         {
             throw new ArgumentException("File name is required.", nameof(request));
@@ -52,18 +88,38 @@ public sealed class FileService : IFileService
         };
 
         var saved = await _fileRepository.AddAsync(file, cancellationToken);
-        return new FileItemDto(saved.Id, saved.Name, saved.Extension, saved.ContentType, saved.SizeInBytes, saved.ParentFolderId, saved.CreatedAtUtc);
+        return MapFile(saved);
     }
 
-    public async Task<IReadOnlyCollection<FileItemDto>> GetFilesAsync(Guid? parentFolderId, CancellationToken cancellationToken)
+    public async Task<FileItemViewDto> UpdateFileAsync(ReqGuidNameDto request, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request.Name))
+        {
+            throw new ArgumentException("File name is required.", nameof(request));
+        }
+
+        var file = await _fileRepository.GetByIdAsync(request.Id, cancellationToken)
+            ?? throw new FileNotFoundException($"File '{request.Id}' not found.");
+
+        VerifyUserAccess(file.CreatedByUserId);
+
+        file.Name = request.Name.Trim();
+        file.ModifiedAtUtc = DateTime.UtcNow;
+        file.ModifiedByUserId = _userContext.UserId;
+
+        var updated = await _fileRepository.UpdateAsync(file, cancellationToken);
+        return MapFile(updated);
+    }
+
+    public async Task<IReadOnlyCollection<FileItemViewDto>> GetFilesAsync(Guid? parentFolderId, CancellationToken cancellationToken)
     {
         await ValidateParentFolderAccessAsync(parentFolderId, cancellationToken);
 
         var files = await _fileRepository.GetByFolderAsync(parentFolderId, cancellationToken);
-        return files.Select(f => new FileItemDto(f.Id, f.Name, f.Extension, f.ContentType, f.SizeInBytes, f.ParentFolderId, f.CreatedAtUtc)).ToArray();
+        return files.Select(MapFile).ToArray();
     }
 
-    public async Task<(Stream Stream, FileItemDto File)> DownloadFileAsync(Guid fileId, CancellationToken cancellationToken)
+    public async Task<(Stream Stream, FileItemViewDto File)> DownloadFileAsync(Guid fileId, CancellationToken cancellationToken)
     {
         var file = await _fileRepository.GetByIdAsync(fileId, cancellationToken)
                    ?? throw new FileNotFoundException($"File '{fileId}' not found.");
@@ -73,7 +129,7 @@ public sealed class FileService : IFileService
         var stream = await _fileStorage.OpenReadAsync(file.StoragePath, cancellationToken)
                      ?? throw new FileNotFoundException($"Storage path '{file.StoragePath}' not found.");
 
-        var dto = new FileItemDto(file.Id, file.Name, file.Extension, file.ContentType, file.SizeInBytes, file.ParentFolderId, file.CreatedAtUtc);
+        var dto = MapFile(file);
         return (stream, dto);
     }
 
@@ -112,5 +168,22 @@ public sealed class FileService : IFileService
         {
             throw new UnauthorizedAccessException("You do not have permission to access this resource.");
         }
+    }
+
+    private static FileItemViewDto MapFile(FileItem file)
+    {
+        return new FileItemViewDto
+        {
+            Id = file.Id.ToString(),
+            Name = file.Name,
+            Extension = file.Extension,
+            ContentType = file.ContentType,
+            SizeInBytes = file.SizeInBytes,
+            CreatedAt = file.CreatedAtUtc,
+            CreatedBy = file.CreatedByUserId.ToString(),
+            ModifiedAt = file.ModifiedAtUtc,
+            ModifiedBy = file.ModifiedByUserId?.ToString(),
+            ParentFolderId = file.ParentFolderId?.ToString()
+        };
     }
 }

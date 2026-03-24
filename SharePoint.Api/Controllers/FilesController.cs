@@ -1,20 +1,22 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using SharePoint.Application.Contracts;
+using SharePoint.Api.Helper;
 using SharePoint.Application.Abstractions;
+using SharePoint.Application.Contracts;
+using SharePoint.Application.Contracts.Request;
+using SharePoint.Application.Contracts.Response;
 
 namespace SharePoint.Api.Controllers;
 
-public sealed class UploadFormModel
+public class UploadFormModel
 {
     public IFormFile File { get; set; } = null!;
-    public Guid? ParentFolderId { get; set; }
+    public string? ParentFolderId { get; set; }
 }
 
 [ApiController]
-[Authorize]
 [Route("api/files")]
-public sealed class FilesController : ControllerBase
+public class FilesController : ControllerBase
 {
     private readonly IFileService _fileService;
 
@@ -23,27 +25,42 @@ public sealed class FilesController : ControllerBase
         _fileService = fileService;
     }
 
+    [HttpPost]
+    public async Task<ActionResult<FileItemViewDto>> Create([FromBody] ReqCreateFileDto request, CancellationToken cancellationToken)
+    {
+        var created = await _fileService.CreateFileMetadataAsync(request, cancellationToken);
+
+        return CreatedAtAction(nameof(Get), new { parentFolderId = created.ParentFolderId }, created);
+    }
+
     [HttpPost("upload")]
     [RequestSizeLimit(100_000_000)]
-    public async Task<ActionResult<FileItemDto>> Upload([FromForm] UploadFormModel form, CancellationToken cancellationToken)
+    public async Task<ActionResult<FileItemViewDto>> Upload([FromForm] UploadFormModel form, CancellationToken cancellationToken)
     {
         if (form.File.Length == 0)
         {
             return BadRequest("Empty file.");
         }
 
+        var parentFolderId = StringHelper.NormalizeOptionalGuidOrRoot(form.ParentFolderId);
+
         await using var stream = form.File.OpenReadStream();
-        var uploaded = await _fileService.UploadFileAsync(
-            new UploadFileRequest(form.File.FileName, form.File.ContentType, form.ParentFolderId, stream),
-            cancellationToken);
+        var uploaded = await _fileService.UploadFileAsync(new ReqUploadFileDto
+        {
+            FileName = form.File.FileName,
+            ContentType = form.File.ContentType,
+            ParentFolderId = parentFolderId,
+            Content = stream
+        }, cancellationToken);
 
         return Ok(uploaded);
     }
 
     [HttpGet]
-    public async Task<ActionResult<IReadOnlyCollection<FileItemDto>>> Get([FromQuery] Guid? parentFolderId, CancellationToken cancellationToken)
+    public async Task<ActionResult<IReadOnlyCollection<FileItemViewDto>>> Get([FromQuery] string? parentFolderId, CancellationToken cancellationToken)
     {
-        var files = await _fileService.GetFilesAsync(parentFolderId, cancellationToken);
+        var normalizedParentFolderId = StringHelper.NormalizeOptionalGuidOrRoot(parentFolderId);
+        var files = await _fileService.GetFilesAsync(normalizedParentFolderId, cancellationToken);
         return Ok(files);
     }
 
@@ -59,5 +76,17 @@ public sealed class FilesController : ControllerBase
     {
         await _fileService.DeleteFileAsync(id, cancellationToken);
         return NoContent();
+    }
+
+    [HttpPut]
+    public async Task<ActionResult<FileItemViewDto>> Update([FromBody] ReqGuidNameDto request, CancellationToken cancellationToken)
+    {
+        if (request.Id == Guid.Empty)
+        {
+            return BadRequest("File id is required.");
+        }
+
+        var updated = await _fileService.UpdateFileAsync(request, cancellationToken);
+        return Ok(updated);
     }
 }
