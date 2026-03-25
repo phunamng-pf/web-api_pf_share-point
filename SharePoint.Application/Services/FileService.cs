@@ -3,6 +3,7 @@ using SharePoint.Application.Contracts;
 using SharePoint.Application.Contracts.Request;
 using SharePoint.Application.Contracts.Response;
 using SharePoint.Domain.Entities;
+using SharePoint.Application.Helper;
 
 namespace SharePoint.Application.Services;
 
@@ -66,7 +67,7 @@ public class FileService : IFileService
 
         var saved = await _fileRepository.AddAsync(file, cancellationToken);
         var displayNameLookup = await BuildDisplayNameLookupAsync(new[] { saved }, cancellationToken);
-        return MapFile(saved, displayNameLookup);
+        return DtoMappingHelper.MapFile(saved, displayNameLookup);
     }
 
     public async Task<FileItemViewDto> UploadFileAsync(ReqUploadFileDto request, CancellationToken cancellationToken)
@@ -118,7 +119,7 @@ public class FileService : IFileService
 
         var saved = await _fileRepository.AddAsync(file, cancellationToken);
         var displayNameLookup = await BuildDisplayNameLookupAsync(new[] { saved }, cancellationToken);
-        return MapFile(saved, displayNameLookup);
+        return DtoMappingHelper.MapFile(saved, displayNameLookup);
     }
 
     public async Task<FileItemViewDto> UpdateFileAsync(ReqGuidNameDto request, CancellationToken cancellationToken)
@@ -139,7 +140,7 @@ public class FileService : IFileService
 
         var updated = await _fileRepository.UpdateAsync(file, cancellationToken);
         var displayNameLookup = await BuildDisplayNameLookupAsync(new[] { updated }, cancellationToken);
-        return MapFile(updated, displayNameLookup);
+        return DtoMappingHelper.MapFile(updated, displayNameLookup);
     }
 
     public async Task<IReadOnlyCollection<FileItemViewDto>> GetFilesAsync(Guid? parentFolderId, CancellationToken cancellationToken)
@@ -149,7 +150,7 @@ public class FileService : IFileService
 
         var files = await _fileRepository.GetByFolderAsync(normalizedParentFolderId, cancellationToken);
         var displayNameLookup = await BuildDisplayNameLookupAsync(files, cancellationToken);
-        return files.Select(x => MapFile(x, displayNameLookup)).ToArray();
+        return files.Select(x => DtoMappingHelper.MapFile(x, displayNameLookup)).ToArray();
     }
 
     public async Task<(Stream Stream, FileItemViewDto File)> DownloadFileAsync(Guid fileId, CancellationToken cancellationToken)
@@ -163,7 +164,7 @@ public class FileService : IFileService
                      ?? throw new FileNotFoundException($"Storage path '{file.StoragePath}' not found.");
 
         var displayNameLookup = await BuildDisplayNameLookupAsync(new[] { file }, cancellationToken);
-        var dto = MapFile(file, displayNameLookup);
+        var dto = DtoMappingHelper.MapFile(file, displayNameLookup);
         return (stream, dto);
     }
 
@@ -211,23 +212,6 @@ public class FileService : IFileService
         }
     }
 
-    private FileItemViewDto MapFile(FileItem file, IReadOnlyDictionary<Guid, string> displayNameLookup)
-    {
-        return new FileItemViewDto
-        {
-            Id = file.Id.ToString(),
-            Name = file.Name,
-            Extension = file.Extension,
-            ContentType = file.ContentType,
-            SizeInBytes = file.SizeInBytes,
-            CreatedAt = file.CreatedAt,
-            CreatedBy = ResolveDisplayName(file.CreatedByUserId, displayNameLookup),
-            ModifiedAt = file.ModifiedAt,
-            ModifiedBy = ResolveDisplayName(file.ModifiedByUserId, displayNameLookup),
-            ParentFolderId = file.ParentFolderId?.ToString()
-        };
-    }
-
     private async Task<IReadOnlyDictionary<Guid, string>> BuildDisplayNameLookupAsync(
         IEnumerable<FileItem> files,
         CancellationToken cancellationToken)
@@ -248,27 +232,5 @@ public class FileService : IFileService
         }
 
         return await _userRepository.GetDisplayNamesByIdsAsync(userIds.ToArray(), cancellationToken);
-    }
-
-    private static string ResolveDisplayName(Guid userId, IReadOnlyDictionary<Guid, string> displayNameLookup)
-    {
-        if (userId == Guid.Empty)
-        {
-            return "System";
-        }
-
-        return displayNameLookup.TryGetValue(userId, out var displayName)
-            ? displayName
-            : userId.ToString();
-    }
-
-    private static string? ResolveDisplayName(Guid? userId, IReadOnlyDictionary<Guid, string> displayNameLookup)
-    {
-        if (!userId.HasValue)
-        {
-            return null;
-        }
-
-        return ResolveDisplayName(userId.Value, displayNameLookup);
     }
 }

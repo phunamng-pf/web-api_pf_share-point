@@ -3,6 +3,7 @@ using SharePoint.Application.Contracts;
 using SharePoint.Application.Contracts.Request;
 using SharePoint.Application.Contracts.Response;
 using SharePoint.Domain.Entities;
+using SharePoint.Application.Helper;
 
 namespace SharePoint.Application.Services;
 
@@ -34,7 +35,7 @@ public class FolderService : IFolderService
             throw new ArgumentException("Folder name is required.", nameof(request.Name));
         }
 
-        var normalizedParentId = NormalizeParentFolderId(request.ParentId);
+        var normalizedParentId = DtoMappingHelper.NormalizeParentFolderId(request.ParentId);
         await ValidateParentFolderAccessAsync(normalizedParentId, cancellationToken);
         var now = DateTime.UtcNow;
 
@@ -50,7 +51,7 @@ public class FolderService : IFolderService
 
         var saved = await _folderRepository.AddAsync(folder, cancellationToken);
         var displayNameLookup = await BuildDisplayNameLookupAsync(new[] { saved }, Array.Empty<Domain.Entities.FileItem>(), cancellationToken);
-        return MapFolder(saved, Array.Empty<FolderTreeDto>(), Array.Empty<FileItemViewDto>(), displayNameLookup);
+        return DtoMappingHelper.MapFolder(saved, Array.Empty<FolderTreeDto>(), Array.Empty<FileItemViewDto>(), displayNameLookup);
     }
 
     public async Task<FolderTreeDto> GetFolderByIdAsync(Guid folderId, CancellationToken cancellationToken)
@@ -67,7 +68,7 @@ public class FolderService : IFolderService
 
     public async Task<IReadOnlyCollection<FolderTreeDto>> GetFoldersAsync(Guid? parentId, CancellationToken cancellationToken)
     {
-        var normalizedParentId = NormalizeParentFolderId(parentId);
+        var normalizedParentId = DtoMappingHelper.NormalizeParentFolderId(parentId);
         var allFolders = await _folderRepository.GetByUserAsync(_userContext.UserId, cancellationToken);
 
         if (allFolders.All(x => x.Id != normalizedParentId))
@@ -78,18 +79,7 @@ public class FolderService : IFolderService
         var folders = allFolders.Where(x => x.ParentId == normalizedParentId).OrderBy(x => x.Name).ToArray();
         var displayNameLookup = await BuildDisplayNameLookupAsync(folders, Array.Empty<Domain.Entities.FileItem>(), cancellationToken);
 
-        return folders.Select(f => new FolderTreeDto
-        {
-            Id = f.Id.ToString(),
-            Name = f.Name,
-            ParentId = f.ParentId?.ToString(),
-            CreatedAt = f.CreatedAt,
-            CreatedBy = ResolveDisplayName(f.CreatedByUserId, displayNameLookup),
-            ModifiedAt = f.ModifiedAt,
-            ModifiedBy = ResolveDisplayName(f.ModifiedByUserId, displayNameLookup),
-            Files = Array.Empty<FileItemViewDto>(),
-            SubFolders = Array.Empty<FolderTreeDto>()
-        }).ToArray();
+        return folders.Select(f => DtoMappingHelper.MapFolder(f, Array.Empty<FolderTreeDto>(), Array.Empty<FileItemViewDto>(), displayNameLookup)).ToArray();
     }
 
     public async Task<FolderTreeDto> UpdateFolderAsync(ReqGuidNameDto request, CancellationToken cancellationToken)
@@ -115,7 +105,7 @@ public class FolderService : IFolderService
 
         var updated = await _folderRepository.UpdateAsync(folder, cancellationToken);
         var displayNameLookup = await BuildDisplayNameLookupAsync(new[] { updated }, Array.Empty<Domain.Entities.FileItem>(), cancellationToken);
-        return MapFolder(updated, Array.Empty<FolderTreeDto>(), Array.Empty<FileItemViewDto>(), displayNameLookup);
+        return DtoMappingHelper.MapFolder(updated, Array.Empty<FolderTreeDto>(), Array.Empty<FileItemViewDto>(), displayNameLookup);
     }
 
     public async Task DeleteFolderAsync(Guid folderId, CancellationToken cancellationToken)
@@ -191,7 +181,7 @@ public class FolderService : IFolderService
     /// </summary>
     private async Task ValidateParentFolderAccessAsync(Guid? parentFolderId, CancellationToken cancellationToken)
     {
-        var normalizedParentFolderId = NormalizeParentFolderId(parentFolderId);
+        var normalizedParentFolderId = DtoMappingHelper.NormalizeParentFolderId(parentFolderId);
 
         if (normalizedParentFolderId == RootFolderId)
         {
@@ -203,12 +193,6 @@ public class FolderService : IFolderService
 
         VerifyUserAccess(parentFolder.CreatedByUserId);
     }
-
-    private static Guid NormalizeParentFolderId(Guid? parentFolderId)
-    {
-        return parentFolderId ?? RootFolderId;
-    }
-
     /// <summary>
     /// Verifies that the resource owner (createdByUserId) matches the current user.
     /// Throws UnauthorizedAccessException if access is denied.
@@ -229,7 +213,6 @@ public class FolderService : IFolderService
     {
         var folderLookup = allFolders.ToLookup(x => x.ParentId);
         var fileLookup = allFiles.ToLookup(x => x.ParentFolderId);
-
         return BuildFolderTree(folder, folderLookup, fileLookup, displayNameLookup);
     }
 
@@ -246,47 +229,10 @@ public class FolderService : IFolderService
 
         var childFiles = fileLookup[folder.Id]
             .OrderBy(x => x.Name)
-            .Select(x => MapFile(x, displayNameLookup))
+            .Select(x => DtoMappingHelper.MapFile(x, displayNameLookup))
             .ToArray();
 
-        return MapFolder(folder, childFolders, childFiles, displayNameLookup);
-    }
-
-    private static FolderTreeDto MapFolder(
-        Folder folder,
-        IReadOnlyCollection<FolderTreeDto> subFolders,
-        IReadOnlyCollection<FileItemViewDto> files,
-        IReadOnlyDictionary<Guid, string> displayNameLookup)
-    {
-        return new FolderTreeDto
-        {
-            Id = folder.Id.ToString(),
-            Name = folder.Name,
-            Files = files,
-            SubFolders = subFolders,
-            CreatedAt = folder.CreatedAt,
-            CreatedBy = ResolveDisplayName(folder.CreatedByUserId, displayNameLookup),
-            ModifiedAt = folder.ModifiedAt,
-            ModifiedBy = ResolveDisplayName(folder.ModifiedByUserId, displayNameLookup),
-            ParentId = folder.ParentId?.ToString()
-        };
-    }
-
-    private static FileItemViewDto MapFile(Domain.Entities.FileItem file, IReadOnlyDictionary<Guid, string> displayNameLookup)
-    {
-        return new FileItemViewDto
-        {
-            Id = file.Id.ToString(),
-            Name = file.Name,
-            Extension = file.Extension,
-            ContentType = file.ContentType,
-            SizeInBytes = file.SizeInBytes,
-            CreatedAt = file.CreatedAt,
-            CreatedBy = ResolveDisplayName(file.CreatedByUserId, displayNameLookup),
-            ModifiedAt = file.ModifiedAt,
-            ModifiedBy = ResolveDisplayName(file.ModifiedByUserId, displayNameLookup),
-            ParentFolderId = file.ParentFolderId?.ToString()
-        };
+        return DtoMappingHelper.MapFolder(folder, childFolders, childFiles, displayNameLookup);
     }
 
     private async Task<IReadOnlyDictionary<Guid, string>> BuildDisplayNameLookupAsync(
@@ -323,27 +269,5 @@ public class FolderService : IFolderService
         }
 
         return await _userRepository.GetDisplayNamesByIdsAsync(userIds.ToArray(), cancellationToken);
-    }
-
-    private static string ResolveDisplayName(Guid userId, IReadOnlyDictionary<Guid, string> displayNameLookup)
-    {
-        if (userId == Guid.Empty)
-        {
-            return "System";
-        }
-
-        return displayNameLookup.TryGetValue(userId, out var displayName)
-            ? displayName
-            : userId.ToString();
-    }
-
-    private static string? ResolveDisplayName(Guid? userId, IReadOnlyDictionary<Guid, string> displayNameLookup)
-    {
-        if (!userId.HasValue)
-        {
-            return null;
-        }
-
-        return ResolveDisplayName(userId.Value, displayNameLookup);
     }
 }
