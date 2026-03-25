@@ -9,5 +9,5 @@ public class AppUser : AuditableEntity
     public required string TenantId { get; set; }
     public required string Email { get; set; }
     public required string DisplayName { get; set; }
-    public DateTime LastLoginAtUtc { get; set; } = DateTime.UtcNow;
+    public DateTime LastLoginAt { get; set; } = DateTime.UtcNow;
 }

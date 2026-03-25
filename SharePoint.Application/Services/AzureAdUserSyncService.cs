@@ -15,29 +15,27 @@ public class AzureAdUserSyncService : IAzureAdUserSyncService
 
     public async Task<AppUser> EnsureUserAsync(ClaimsPrincipal principal, CancellationToken cancellationToken)
     {
-        var objectId = principal.FindFirst("oid")?.Value
+        var objectId = principal.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value 
             ?? throw new UnauthorizedAccessException("Missing oid claim.");
 
-        var tenantId = principal.FindFirst("tid")?.Value
+        var tenantId = principal.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value 
             ?? string.Empty;
 
-        var email = principal.FindFirst("preferred_username")?.Value
-            ?? principal.FindFirst(ClaimTypes.Email)?.Value
+        var email = principal.FindFirst(ClaimTypes.Email)?.Value 
             ?? "unknown@local";
 
-        var displayName = principal.Identity?.Name
-            ?? principal.FindFirst("name")?.Value
+        var displayName = principal.FindFirst("name")?.Value 
             ?? email;
 
         var existing = await _userRepository.GetByAzureAdObjectIdAsync(objectId, cancellationToken);
 
         if (existing is not null)
         {
-            existing.LastLoginAtUtc = DateTime.UtcNow;
+            existing.LastLoginAt = DateTime.UtcNow;
             existing.Email = email;
             existing.DisplayName = displayName;
             existing.TenantId = tenantId;
-            existing.ModifiedAtUtc = DateTime.UtcNow;
+            existing.ModifiedAt = DateTime.UtcNow;
 
             await _userRepository.UpdateAsync(existing, cancellationToken);
             return existing;
@@ -49,8 +47,8 @@ public class AzureAdUserSyncService : IAzureAdUserSyncService
             TenantId = tenantId,
             Email = email,
             DisplayName = displayName,
-            CreatedAtUtc = DateTime.UtcNow,
-            LastLoginAtUtc = DateTime.UtcNow
+            CreatedAt = DateTime.UtcNow,
+            LastLoginAt = DateTime.UtcNow
         };
 
         return await _userRepository.AddAsync(user, cancellationToken);

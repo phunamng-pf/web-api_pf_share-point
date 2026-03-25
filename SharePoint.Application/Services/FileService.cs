@@ -8,19 +8,24 @@ namespace SharePoint.Application.Services;
 
 public class FileService : IFileService
 {
+    private static readonly Guid RootFolderId = Guid.Empty;
+
     private readonly IFolderRepository _folderRepository;
     private readonly IFileRepository _fileRepository;
+    private readonly IUserRepository _userRepository;
     private readonly IFileStorage _fileStorage;
     private readonly IUserContext _userContext;
 
     public FileService(
         IFolderRepository folderRepository,
         IFileRepository fileRepository,
+        IUserRepository userRepository,
         IFileStorage fileStorage,
         IUserContext userContext)
     {
         _folderRepository = folderRepository;
         _fileRepository = fileRepository;
+        _userRepository = userRepository;
         _fileStorage = fileStorage;
         _userContext = userContext;
     }
@@ -37,11 +42,13 @@ public class FileService : IFileService
             throw new ArgumentException("File extension is required.", nameof(request.Extension));
         }
 
-        await ValidateParentFolderAccessAsync(request.ParentFolderId, cancellationToken);
+        var normalizedParentFolderId = NormalizeParentFolderId(request.ParentFolderId);
+        await ValidateParentFolderAccessAsync(normalizedParentFolderId, cancellationToken);
 
         var normalizedExtension = request.Extension.StartsWith('.')
             ? request.Extension
             : $".{request.Extension}";
+        var now = DateTime.UtcNow;
 
         var file = new FileItem
         {
@@ -50,12 +57,16 @@ public class FileService : IFileService
             StoragePath = string.Empty,
             ContentType = "application/octet-stream",
             SizeInBytes = 0,
-            ParentFolderId = request.ParentFolderId,
-            CreatedByUserId = _userContext.UserId
+            ParentFolderId = normalizedParentFolderId,
+            CreatedAt = now,
+            ModifiedAt = now,
+            CreatedByUserId = _userContext.UserId,
+            ModifiedByUserId = _userContext.UserId
         };
 
         var saved = await _fileRepository.AddAsync(file, cancellationToken);
-        return MapFile(saved);
+        var displayNameLookup = await BuildDisplayNameLookupAsync(new[] { saved }, cancellationToken);
+        return MapFile(saved, displayNameLookup);
     }
 
     public async Task<FileItemViewDto> UploadFileAsync(ReqUploadFileDto request, CancellationToken cancellationToken)
@@ -66,29 +77,48 @@ public class FileService : IFileService
             throw new ArgumentException("File name is required.", nameof(request));
         }
 
-        if (request.Content.Length == 0)
+        if (request.Content == Stream.Null)
+        {
+            throw new ArgumentException("File stream is required.", nameof(request));
+        }
+
+        var sizeInBytes = request.FileSize;
+        if (sizeInBytes <= 0 && request.Content.CanSeek)
+        {
+            sizeInBytes = request.Content.Length;
+        }
+
+        if (sizeInBytes <= 0)
         {
             throw new ArgumentException("File content is empty.", nameof(request));
         }
 
-        await ValidateParentFolderAccessAsync(request.ParentFolderId, cancellationToken);
+        var normalizedParentFolderId = NormalizeParentFolderId(request.ParentFolderId);
+        await ValidateParentFolderAccessAsync(normalizedParentFolderId, cancellationToken);
 
         var extension = Path.GetExtension(request.FileName);
         var storagePath = await _fileStorage.SaveAsync(request.Content, extension, cancellationToken);
+        var now = DateTime.UtcNow;
 
         var file = new FileItem
         {
             Name = Path.GetFileNameWithoutExtension(request.FileName),
             Extension = extension,
             StoragePath = storagePath,
-            ContentType = request.ContentType,
-            SizeInBytes = request.Content.Length,
-            ParentFolderId = request.ParentFolderId,
-            CreatedByUserId = _userContext.UserId
+            ContentType = string.IsNullOrWhiteSpace(request.ContentType)
+                ? "application/octet-stream"
+                : request.ContentType,
+            SizeInBytes = sizeInBytes,
+            ParentFolderId = normalizedParentFolderId,
+            CreatedAt = now,
+            ModifiedAt = now,
+            CreatedByUserId = _userContext.UserId,
+            ModifiedByUserId = _userContext.UserId
         };
 
         var saved = await _fileRepository.AddAsync(file, cancellationToken);
-        return MapFile(saved);
+        var displayNameLookup = await BuildDisplayNameLookupAsync(new[] { saved }, cancellationToken);
+        return MapFile(saved, displayNameLookup);
     }
 
     public async Task<FileItemViewDto> UpdateFileAsync(ReqGuidNameDto request, CancellationToken cancellationToken)
@@ -104,19 +134,22 @@ public class FileService : IFileService
         VerifyUserAccess(file.CreatedByUserId);
 
         file.Name = request.Name.Trim();
-        file.ModifiedAtUtc = DateTime.UtcNow;
+        file.ModifiedAt = DateTime.UtcNow;
         file.ModifiedByUserId = _userContext.UserId;
 
         var updated = await _fileRepository.UpdateAsync(file, cancellationToken);
-        return MapFile(updated);
+        var displayNameLookup = await BuildDisplayNameLookupAsync(new[] { updated }, cancellationToken);
+        return MapFile(updated, displayNameLookup);
     }
 
     public async Task<IReadOnlyCollection<FileItemViewDto>> GetFilesAsync(Guid? parentFolderId, CancellationToken cancellationToken)
     {
-        await ValidateParentFolderAccessAsync(parentFolderId, cancellationToken);
+        var normalizedParentFolderId = NormalizeParentFolderId(parentFolderId);
+        await ValidateParentFolderAccessAsync(normalizedParentFolderId, cancellationToken);
 
-        var files = await _fileRepository.GetByFolderAsync(parentFolderId, cancellationToken);
-        return files.Select(MapFile).ToArray();
+        var files = await _fileRepository.GetByFolderAsync(normalizedParentFolderId, cancellationToken);
+        var displayNameLookup = await BuildDisplayNameLookupAsync(files, cancellationToken);
+        return files.Select(x => MapFile(x, displayNameLookup)).ToArray();
     }
 
     public async Task<(Stream Stream, FileItemViewDto File)> DownloadFileAsync(Guid fileId, CancellationToken cancellationToken)
@@ -129,7 +162,8 @@ public class FileService : IFileService
         var stream = await _fileStorage.OpenReadAsync(file.StoragePath, cancellationToken)
                      ?? throw new FileNotFoundException($"Storage path '{file.StoragePath}' not found.");
 
-        var dto = MapFile(file);
+        var displayNameLookup = await BuildDisplayNameLookupAsync(new[] { file }, cancellationToken);
+        var dto = MapFile(file, displayNameLookup);
         return (stream, dto);
     }
 
@@ -147,15 +181,22 @@ public class FileService : IFileService
     /// </summary>
     private async Task ValidateParentFolderAccessAsync(Guid? parentFolderId, CancellationToken cancellationToken)
     {
-        if (!parentFolderId.HasValue)
+        var normalizedParentFolderId = NormalizeParentFolderId(parentFolderId);
+
+        if (normalizedParentFolderId == RootFolderId)
         {
             return;
         }
 
-        var parentFolder = await _folderRepository.GetByIdAsync(parentFolderId.Value, cancellationToken)
-                           ?? throw new FileNotFoundException($"Folder '{parentFolderId.Value}' not found.");
+        var parentFolder = await _folderRepository.GetByIdAsync(normalizedParentFolderId, cancellationToken)
+                           ?? throw new FileNotFoundException($"Folder '{normalizedParentFolderId}' not found.");
 
         VerifyUserAccess(parentFolder.CreatedByUserId);
+    }
+
+    private static Guid NormalizeParentFolderId(Guid? parentFolderId)
+    {
+        return parentFolderId ?? RootFolderId;
     }
 
     /// <summary>
@@ -170,7 +211,7 @@ public class FileService : IFileService
         }
     }
 
-    private static FileItemViewDto MapFile(FileItem file)
+    private FileItemViewDto MapFile(FileItem file, IReadOnlyDictionary<Guid, string> displayNameLookup)
     {
         return new FileItemViewDto
         {
@@ -179,11 +220,55 @@ public class FileService : IFileService
             Extension = file.Extension,
             ContentType = file.ContentType,
             SizeInBytes = file.SizeInBytes,
-            CreatedAt = file.CreatedAtUtc,
-            CreatedBy = file.CreatedByUserId.ToString(),
-            ModifiedAt = file.ModifiedAtUtc,
-            ModifiedBy = file.ModifiedByUserId?.ToString(),
+            CreatedAt = file.CreatedAt,
+            CreatedBy = ResolveDisplayName(file.CreatedByUserId, displayNameLookup),
+            ModifiedAt = file.ModifiedAt,
+            ModifiedBy = ResolveDisplayName(file.ModifiedByUserId, displayNameLookup),
             ParentFolderId = file.ParentFolderId?.ToString()
         };
+    }
+
+    private async Task<IReadOnlyDictionary<Guid, string>> BuildDisplayNameLookupAsync(
+        IEnumerable<FileItem> files,
+        CancellationToken cancellationToken)
+    {
+        var userIds = new HashSet<Guid>();
+
+        foreach (var file in files)
+        {
+            if (file.CreatedByUserId != Guid.Empty)
+            {
+                userIds.Add(file.CreatedByUserId);
+            }
+
+            if (file.ModifiedByUserId.HasValue && file.ModifiedByUserId.Value != Guid.Empty)
+            {
+                userIds.Add(file.ModifiedByUserId.Value);
+            }
+        }
+
+        return await _userRepository.GetDisplayNamesByIdsAsync(userIds.ToArray(), cancellationToken);
+    }
+
+    private static string ResolveDisplayName(Guid userId, IReadOnlyDictionary<Guid, string> displayNameLookup)
+    {
+        if (userId == Guid.Empty)
+        {
+            return "System";
+        }
+
+        return displayNameLookup.TryGetValue(userId, out var displayName)
+            ? displayName
+            : userId.ToString();
+    }
+
+    private static string? ResolveDisplayName(Guid? userId, IReadOnlyDictionary<Guid, string> displayNameLookup)
+    {
+        if (!userId.HasValue)
+        {
+            return null;
+        }
+
+        return ResolveDisplayName(userId.Value, displayNameLookup);
     }
 }

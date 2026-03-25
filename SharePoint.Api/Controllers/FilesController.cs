@@ -15,6 +15,7 @@ public class UploadFormModel
 }
 
 [ApiController]
+[Authorize]
 [Route("api/files")]
 public class FilesController : ControllerBase
 {
@@ -30,14 +31,14 @@ public class FilesController : ControllerBase
     {
         var created = await _fileService.CreateFileMetadataAsync(request, cancellationToken);
 
-        return CreatedAtAction(nameof(Get), new { parentFolderId = created.ParentFolderId }, created);
+        return Created("", created);
     }
 
     [HttpPost("upload")]
     [RequestSizeLimit(100_000_000)]
     public async Task<ActionResult<FileItemViewDto>> Upload([FromForm] UploadFormModel form, CancellationToken cancellationToken)
     {
-        if (form.File.Length == 0)
+        if (form.File is null || form.File.Length == 0)
         {
             return BadRequest("Empty file.");
         }
@@ -48,27 +49,13 @@ public class FilesController : ControllerBase
         var uploaded = await _fileService.UploadFileAsync(new ReqUploadFileDto
         {
             FileName = form.File.FileName,
-            ContentType = form.File.ContentType,
+            ContentType = form.File.ContentType ?? "application/octet-stream",
             ParentFolderId = parentFolderId,
+            FileSize = form.File.Length,
             Content = stream
         }, cancellationToken);
 
         return Ok(uploaded);
-    }
-
-    [HttpGet]
-    public async Task<ActionResult<IReadOnlyCollection<FileItemViewDto>>> Get([FromQuery] string? parentFolderId, CancellationToken cancellationToken)
-    {
-        var normalizedParentFolderId = StringHelper.NormalizeOptionalGuidOrRoot(parentFolderId);
-        var files = await _fileService.GetFilesAsync(normalizedParentFolderId, cancellationToken);
-        return Ok(files);
-    }
-
-    [HttpGet("{id:guid}/download")]
-    public async Task<IActionResult> Download(Guid id, CancellationToken cancellationToken)
-    {
-        var (stream, file) = await _fileService.DownloadFileAsync(id, cancellationToken);
-        return File(stream, file.ContentType, $"{file.Name}{file.Extension}");
     }
 
     [HttpDelete("{id:guid}")]
@@ -89,4 +76,19 @@ public class FilesController : ControllerBase
         var updated = await _fileService.UpdateFileAsync(request, cancellationToken);
         return Ok(updated);
     }
+
+    //[HttpGet("{id:guid}/download")]
+    //public async Task<IActionResult> Download(Guid id, CancellationToken cancellationToken)
+    //{
+    //    var (stream, file) = await _fileService.DownloadFileAsync(id, cancellationToken);
+    //    return File(stream, file.ContentType, $"{file.Name}{file.Extension}");
+    //}
+
+    //[HttpGet]
+    //public async Task<ActionResult<IReadOnlyCollection<FileItemViewDto>>> Get([FromQuery] string? parentFolderId, CancellationToken cancellationToken)
+    //{
+    //    var normalizedParentFolderId = StringHelper.NormalizeOptionalGuidOrRoot(parentFolderId);
+    //    var files = await _fileService.GetFilesAsync(normalizedParentFolderId, cancellationToken);
+    //    return Ok(files);
+    //}
 }

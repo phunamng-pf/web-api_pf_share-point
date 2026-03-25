@@ -60,7 +60,7 @@ public class FileRepository : IFileRepository
         }
 
         file.IsDeleted = true;
-        file.ModifiedAtUtc = DateTime.UtcNow;
+        file.ModifiedAt = DateTime.UtcNow;
         await _dbContext.SaveChangesAsync(cancellationToken);
     }
 }

@@ -6,7 +6,7 @@
         {
             if (string.IsNullOrWhiteSpace(value) || IsRoot(value))
             {
-                return null;
+                return Guid.Empty;
             }
 
             if (Guid.TryParse(value, out var parsed))
@@ -29,7 +29,8 @@
 
         public static bool IsRoot(string value)
         {
-            return string.Equals(value, "root", StringComparison.OrdinalIgnoreCase);
+            return string.Equals(value, "root", StringComparison.OrdinalIgnoreCase)
+                || (Guid.TryParse(value, out var parsed) && parsed == Guid.Empty);
         }
     }
 }

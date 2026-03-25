@@ -17,9 +17,18 @@ public class GlobalExceptionMiddleware
         {
             await _next(context);
         }
+        catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
+        {
+            _logger.LogInformation("Request was canceled by the client: {Method} {Path}", context.Request.Method, context.Request.Path);
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Unhandled exception for request {Method} {Path}", context.Request.Method, context.Request.Path);
+
+            if (context.Response.HasStarted)
+            {
+                return;
+            }
 
             var (statusCode, message) = ex switch
             {

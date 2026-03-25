@@ -399,3 +399,7 @@ FodyWeavers.xsd
 
 .github
 /docs
+
+# Local configuration overrides (may contain secrets)
+appsettings.json
+appsettings.Development.json

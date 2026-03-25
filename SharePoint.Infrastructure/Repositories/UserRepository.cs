@@ -19,6 +19,18 @@ public class UserRepository : IUserRepository
             .FirstOrDefaultAsync(x => x.AzureAdObjectId == azureAdObjectId, cancellationToken);
     }
 
+    public async Task<IReadOnlyDictionary<Guid, string>> GetDisplayNamesByIdsAsync(IReadOnlyCollection<Guid> userIds, CancellationToken cancellationToken)
+    {
+        if (userIds.Count == 0)
+        {
+            return new Dictionary<Guid, string>();
+        }
+
+        return await _dbContext.Users
+            .Where(x => userIds.Contains(x.Id))
+            .ToDictionaryAsync(x => x.Id, x => x.DisplayName, cancellationToken);
+    }
+
     public async Task<AppUser> AddAsync(AppUser user, CancellationToken cancellationToken)
     {
         _dbContext.Users.Add(user);

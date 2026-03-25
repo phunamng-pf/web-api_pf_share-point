@@ -29,7 +29,7 @@ public class FolderRepository : IFolderRepository
     public async Task<IReadOnlyCollection<Folder>> GetByUserAsync(Guid userId, CancellationToken cancellationToken)
     {
         return await _dbContext.Folders
-            .Where(x => x.CreatedByUserId == userId)
+            .Where(x => x.CreatedByUserId == userId || x.Id == Guid.Empty)
             .OrderBy(x => x.Name)
             .ToArrayAsync(cancellationToken);
     }
@@ -51,6 +51,11 @@ public class FolderRepository : IFolderRepository
 
     public async Task SoftDeleteAsync(Guid id, CancellationToken cancellationToken)
     {
+        if (id == Guid.Empty)
+        {
+            return;
+        }
+
         var folder = await _dbContext.Folders
             .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
 
@@ -60,7 +65,7 @@ public class FolderRepository : IFolderRepository
         }
 
         folder.IsDeleted = true;
-        folder.ModifiedAtUtc = DateTime.UtcNow;
+        folder.ModifiedAt = DateTime.UtcNow;
         await _dbContext.SaveChangesAsync(cancellationToken);
     }
 }

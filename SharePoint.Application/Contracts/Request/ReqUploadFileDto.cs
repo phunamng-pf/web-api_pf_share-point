@@ -11,6 +11,7 @@ namespace SharePoint.Application.Contracts.Request
         public string FileName { get; set; } = string.Empty;
         public string ContentType { get; set; } = string.Empty;
         public Guid? ParentFolderId { get; set; }
+        public long FileSize { get; set; }
         public Stream Content { get; set; } = Stream.Null;
     }
 }

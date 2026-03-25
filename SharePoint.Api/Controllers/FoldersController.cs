@@ -27,14 +27,6 @@ public class FoldersController : ControllerBase
         return CreatedAtAction(nameof(GetById), new { id = folder.Id }, folder);
     }
 
-    [HttpGet]
-    public async Task<ActionResult<IReadOnlyCollection<FolderTreeDto>>> Get([FromQuery] string? parentId, CancellationToken cancellationToken)
-    {
-        var normalizedParentId = StringHelper.NormalizeOptionalGuidOrRoot(parentId);
-        var folders = await _folderService.GetFoldersAsync(normalizedParentId, cancellationToken);
-        return Ok(folders);
-    }
-
     [HttpGet("{id}")]
     public async Task<ActionResult<FolderTreeDto>> GetById(string id, CancellationToken cancellationToken)
     {
@@ -53,7 +45,7 @@ public class FoldersController : ControllerBase
     {
         if (request.Id == Guid.Empty)
         {
-            return BadRequest("Folder id is required.");
+            return BadRequest("Root folder cannot be modified.");
         }
 
         var updated = await _folderService.UpdateFolderAsync(request, cancellationToken);
@@ -82,7 +74,7 @@ public class FoldersController : ControllerBase
             {
                 new BreadcrumbInfoDto
                 {
-                    Id = "root",
+                    Id = Guid.Empty.ToString(),
                     Name = "Documents"
                 }
             });
@@ -92,4 +84,12 @@ public class FoldersController : ControllerBase
         var breadcrumb = await _folderService.GetBreadcrumbAsync(folderId, cancellationToken);
         return Ok(breadcrumb);
     }
+
+    //[HttpGet]
+    //public async Task<ActionResult<IReadOnlyCollection<FolderTreeDto>>> Get([FromQuery] string? parentId, CancellationToken cancellationToken)
+    //{
+    //    var normalizedParentId = StringHelper.NormalizeOptionalGuidOrRoot(parentId);
+    //    var folders = await _folderService.GetFoldersAsync(normalizedParentId, cancellationToken);
+    //    return Ok(folders);
+    //}
 }
