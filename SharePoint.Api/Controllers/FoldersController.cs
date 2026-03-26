@@ -85,6 +85,13 @@ public class FoldersController : ControllerBase
         return Ok(breadcrumb);
     }
 
+    [HttpGet("{id:guid}/download")]
+    public async Task<IActionResult> Download(Guid id, CancellationToken cancellationToken)
+    {
+        var (stream, folderName) = await _folderService.DownloadFolderAsync(id, cancellationToken);
+        return File(stream, "application/zip", $"{folderName}.zip");
+    }
+
     //[HttpGet]
     //public async Task<ActionResult<IReadOnlyCollection<FolderTreeDto>>> Get([FromQuery] string? parentId, CancellationToken cancellationToken)
     //{

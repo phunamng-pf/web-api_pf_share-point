@@ -12,4 +12,5 @@ public interface IFolderService
     Task<FolderTreeDto> UpdateFolderAsync(ReqGuidNameDto request, CancellationToken cancellationToken);
     Task DeleteFolderAsync(Guid folderId, CancellationToken cancellationToken);
     Task<IReadOnlyCollection<BreadcrumbInfoDto>> GetBreadcrumbAsync(Guid folderId, CancellationToken cancellationToken);
+    Task<(Stream Stream, string FolderName)> DownloadFolderAsync(Guid folderId, CancellationToken cancellationToken);
 }

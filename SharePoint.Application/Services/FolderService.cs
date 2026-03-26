@@ -4,6 +4,7 @@ using SharePoint.Application.Contracts.Request;
 using SharePoint.Application.Contracts.Response;
 using SharePoint.Domain.Entities;
 using SharePoint.Application.Helper;
+using System.IO.Compression;
 
 namespace SharePoint.Application.Services;
 
@@ -13,17 +14,20 @@ public class FolderService : IFolderService
 
     private readonly IFolderRepository _folderRepository;
     private readonly IFileRepository _fileRepository;
+    private readonly IFileStorage _fileStorage;
     private readonly IUserRepository _userRepository;
     private readonly IUserContext _userContext;
 
     public FolderService(
         IFolderRepository folderRepository,
         IFileRepository fileRepository,
+        IFileStorage fileStorage,
         IUserRepository userRepository,
         IUserContext userContext)
     {
         _folderRepository = folderRepository;
         _fileRepository = fileRepository;
+        _fileStorage = fileStorage;
         _userRepository = userRepository;
         _userContext = userContext;
     }
@@ -174,6 +178,55 @@ public class FolderService : IFolderService
         }
 
         return path;
+    }
+
+    public async Task<(Stream Stream, string FolderName)> DownloadFolderAsync(Guid folderId, CancellationToken cancellationToken)
+    {
+        var folder = await _folderRepository.GetByIdAsync(folderId, cancellationToken)
+                     ?? throw new DirectoryNotFoundException($"Folder '{folderId}' not found.");
+
+        VerifyUserAccess(folder.CreatedByUserId);
+
+        var memoryStream = new MemoryStream();
+
+        using (var archive = new ZipArchive(memoryStream, ZipArchiveMode.Create, true))
+        {
+            await AddFolderToZipAsync(archive, folderId, folder.Name, cancellationToken);
+        }
+
+        memoryStream.Position = 0;
+        return (memoryStream, folder.Name);
+    }
+
+    private async Task AddFolderToZipAsync(ZipArchive archive, Guid folderId, string currentPath, CancellationToken cancellationToken)
+    {
+        // add files
+        var files = await _fileRepository.GetByFolderAsync(folderId, cancellationToken);
+
+        foreach (var file in files)
+        {
+            VerifyUserAccess(file.CreatedByUserId);
+
+            var fileStream = await _fileStorage.OpenReadAsync(file.StoragePath, cancellationToken);
+            if (fileStream == null) continue;
+
+            var entryPath = $"{currentPath}/{file.Name}{file.Extension}";
+            var entry = archive.CreateEntry(entryPath);
+
+            using var entryStream = entry.Open();
+            await fileStream.CopyToAsync(entryStream, cancellationToken);
+        }
+
+        // recurse sub folders
+        var subFolders = await _folderRepository.GetChildrenAsync(folderId, cancellationToken);
+
+        foreach (var folder in subFolders)
+        {
+            VerifyUserAccess(folder.CreatedByUserId);
+
+            var newPath = $"{currentPath}/{folder.Name}";
+            await AddFolderToZipAsync(archive, folder.Id, newPath, cancellationToken);
+        }
     }
 
     /// <summary>

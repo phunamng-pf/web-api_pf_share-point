@@ -77,12 +77,12 @@ public class FilesController : ControllerBase
         return Ok(updated);
     }
 
-    //[HttpGet("{id:guid}/download")]
-    //public async Task<IActionResult> Download(Guid id, CancellationToken cancellationToken)
-    //{
-    //    var (stream, file) = await _fileService.DownloadFileAsync(id, cancellationToken);
-    //    return File(stream, file.ContentType, $"{file.Name}{file.Extension}");
-    //}
+    [HttpGet("{id:guid}/download")]
+    public async Task<IActionResult> Download(Guid id, CancellationToken cancellationToken)
+    {
+        var (stream, file) = await _fileService.DownloadFileAsync(id, cancellationToken);
+        return File(stream, file.ContentType, $"{file.Name}{file.Extension}");
+    }
 
     //[HttpGet]
     //public async Task<ActionResult<IReadOnlyCollection<FileItemViewDto>>> Get([FromQuery] string? parentFolderId, CancellationToken cancellationToken)
