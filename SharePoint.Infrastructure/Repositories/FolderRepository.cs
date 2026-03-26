@@ -49,7 +49,7 @@ public class FolderRepository : IFolderRepository
         return folder;
     }
 
-    public async Task SoftDeleteAsync(Guid id, CancellationToken cancellationToken)
+    public async Task SoftDeleteAsync(Guid id, Guid modifiedByUserId, CancellationToken cancellationToken)
     {
         if (id == Guid.Empty)
         {
@@ -57,6 +57,7 @@ public class FolderRepository : IFolderRepository
         }
 
         var folder = await _dbContext.Folders
+            .IgnoreQueryFilters()
             .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
 
         if (folder is null)
@@ -66,6 +67,74 @@ public class FolderRepository : IFolderRepository
 
         folder.IsDeleted = true;
         folder.ModifiedAt = DateTime.UtcNow;
+        folder.ModifiedByUserId = modifiedByUserId;
+        await _dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    public Task<Folder?> GetDeletedByIdAsync(Guid id, CancellationToken cancellationToken)
+    {
+        return _dbContext.Folders
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(x => x.Id == id && x.IsDeleted, cancellationToken);
+    }
+
+    public async Task<IReadOnlyCollection<Folder>> GetDeletedByUserAsync(Guid userId, CancellationToken cancellationToken)
+    {
+        return await _dbContext.Folders
+            .IgnoreQueryFilters()
+            .Where(x => x.CreatedByUserId == userId && x.IsDeleted)
+            .OrderBy(x => x.Name)
+            .ToArrayAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyCollection<Folder>> GetDeletedChildrenAsync(Guid? parentId, CancellationToken cancellationToken)
+    {
+        return await _dbContext.Folders
+            .IgnoreQueryFilters()
+            .Where(x => x.ParentId == parentId && x.IsDeleted)
+            .OrderBy(x => x.Name)
+            .ToArrayAsync(cancellationToken);
+    }
+
+    public async Task RestoreAsync(Guid id, Guid modifiedByUserId, CancellationToken cancellationToken)
+    {
+        if (id == Guid.Empty)
+        {
+            return;
+        }
+
+        var folder = await _dbContext.Folders
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+
+        if (folder is null)
+        {
+            return;
+        }
+
+        folder.IsDeleted = false;
+        folder.ModifiedAt = DateTime.UtcNow;
+        folder.ModifiedByUserId = modifiedByUserId;
+        await _dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task DeletePermanentlyAsync(Guid id, CancellationToken cancellationToken)
+    {
+        if (id == Guid.Empty)
+        {
+            return;
+        }
+
+        var folder = await _dbContext.Folders
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+
+        if (folder is null)
+        {
+            return;
+        }
+
+        _dbContext.Folders.Remove(folder);
         await _dbContext.SaveChangesAsync(cancellationToken);
     }
 }

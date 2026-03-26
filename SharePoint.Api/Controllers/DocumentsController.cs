@@ -25,4 +25,11 @@ public class DocumentsController : ControllerBase
         var documents = await _documentService.GetMyDocumentsAsync(cancellationToken);
         return Ok(documents);
     }
+
+    [HttpGet("recycle-bin")]
+    public async Task<ActionResult<FolderTreeDto>> GetRecycleBinDocuments(CancellationToken cancellationToken)
+    {
+        var documents = await _documentService.GetRecycleBinDocumentsAsync(cancellationToken);
+        return Ok(documents);
+    }
 }

@@ -12,4 +12,6 @@ public interface IFileService
     Task<IReadOnlyCollection<FileItemViewDto>> GetFilesAsync(Guid? parentFolderId, CancellationToken cancellationToken);
     Task<(Stream Stream, FileItemViewDto File)> DownloadFileAsync(Guid fileId, CancellationToken cancellationToken);
     Task DeleteFileAsync(Guid fileId, CancellationToken cancellationToken);
+    Task RestoreFileAsync(Guid fileId, CancellationToken cancellationToken);
+    Task DeleteFilePermanentlyAsync(Guid fileId, CancellationToken cancellationToken);
 }

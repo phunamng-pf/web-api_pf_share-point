@@ -37,4 +37,15 @@ public class LocalFileStorage : IFileStorage
         Stream stream = new FileStream(fullPath, FileMode.Open, FileAccess.Read, FileShare.Read);
         return Task.FromResult<Stream?>(stream);
     }
+
+    public Task DeleteAsync(string storagePath, CancellationToken cancellationToken)
+    {
+        var fullPath = Path.Combine(_rootPath, storagePath);
+        if (File.Exists(fullPath))
+        {
+            File.Delete(fullPath);
+        }
+
+        return Task.CompletedTask;
+    }
 }

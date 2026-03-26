@@ -33,6 +33,7 @@ public class GlobalExceptionMiddleware
             var (statusCode, message) = ex switch
             {
                 ArgumentException => (StatusCodes.Status400BadRequest, "Invalid request."),
+                InvalidOperationException => (StatusCodes.Status400BadRequest, "Invalid request."),
                 UnauthorizedAccessException => (StatusCodes.Status403Forbidden, "Forbidden."),
                 FileNotFoundException => (StatusCodes.Status404NotFound, "Resource not found."),
                 _ => (StatusCodes.Status500InternalServerError, "Unexpected error.")

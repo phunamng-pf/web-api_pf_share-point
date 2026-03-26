@@ -65,6 +65,32 @@ public class FoldersController : ControllerBase
         return NoContent();
     }
 
+    [HttpPost("{id}/restore")]
+    public async Task<IActionResult> Restore(string id, CancellationToken cancellationToken)
+    {
+        if (StringHelper.IsRoot(id))
+        {
+            return BadRequest("Root folder cannot be restored.");
+        }
+
+        var folderId = StringHelper.ParseRequiredGuid(id, nameof(id));
+        await _folderService.RestoreFolderAsync(folderId, cancellationToken);
+        return NoContent();
+    }
+
+    [HttpDelete("{id}/permanent")]
+    public async Task<IActionResult> DeletePermanently(string id, CancellationToken cancellationToken)
+    {
+        if (StringHelper.IsRoot(id))
+        {
+            return BadRequest("Root folder cannot be permanently deleted.");
+        }
+
+        var folderId = StringHelper.ParseRequiredGuid(id, nameof(id));
+        await _folderService.DeleteFolderPermanentlyAsync(folderId, cancellationToken);
+        return NoContent();
+    }
+
     [HttpGet("{id}/breadcrumb")]
     public async Task<ActionResult<IReadOnlyCollection<BreadcrumbInfoDto>>> GetBreadcrumb(string id, CancellationToken cancellationToken)
     {

@@ -6,4 +6,5 @@ namespace SharePoint.Application.Abstractions;
 public interface IDocumentService
 {
     Task<FolderTreeDto> GetMyDocumentsAsync(CancellationToken cancellationToken);
+    Task<FolderTreeDto> GetRecycleBinDocumentsAsync(CancellationToken cancellationToken);
 }

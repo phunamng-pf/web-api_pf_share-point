@@ -35,6 +35,18 @@ public class DocumentService : IDocumentService
         return BuildRootFolder(userFolders, userFiles, displayNameLookup);
     }
 
+    public async Task<FolderTreeDto> GetRecycleBinDocumentsAsync(CancellationToken cancellationToken)
+    {
+        var rootFolder = await _folderRepository.GetByIdAsync(RootFolderId, cancellationToken)
+            ?? throw new FileNotFoundException($"Folder '{RootFolderId}' not found.");
+
+        var deletedUserFolders = await _folderRepository.GetDeletedByUserAsync(_userContext.UserId, cancellationToken);
+        var deletedUserFiles = await _fileRepository.GetDeletedByUserAsync(_userContext.UserId, cancellationToken);
+        var displayNameLookup = await BuildDisplayNameLookupAsync(deletedUserFolders, deletedUserFiles, cancellationToken);
+
+        return BuildRecycleBinRoot(rootFolder, deletedUserFolders, deletedUserFiles, displayNameLookup);
+    }
+
     private FolderTreeDto BuildRootFolder(
         IReadOnlyCollection<Domain.Entities.Folder> folders,
         IReadOnlyCollection<Domain.Entities.FileItem> files,
@@ -76,6 +88,39 @@ public class DocumentService : IDocumentService
             .ToArray();
 
         return DtoMappingHelper.MapFolder(folder, childFolders, childFiles, displayNameLookup);
+    }
+
+    private static FolderTreeDto BuildRecycleBinRoot(
+        Domain.Entities.Folder rootFolder,
+        IReadOnlyCollection<Domain.Entities.Folder> deletedFolders,
+        IReadOnlyCollection<Domain.Entities.FileItem> deletedFiles,
+        IReadOnlyDictionary<Guid, string> displayNameLookup)
+    {
+        var deletedFolderIdSet = deletedFolders
+            .Select(x => x.Id)
+            .ToHashSet();
+
+        var deletedFoldersByParent = deletedFolders
+            .Where(x => x.ParentId.HasValue && deletedFolderIdSet.Contains(x.ParentId.Value))
+            .ToLookup(x => x.ParentId);
+
+        var deletedFilesByParent = deletedFiles
+            .Where(x => x.ParentFolderId.HasValue && deletedFolderIdSet.Contains(x.ParentFolderId.Value))
+            .ToLookup(x => x.ParentFolderId);
+
+        var rootFolders = deletedFolders
+            .Where(x => !x.ParentId.HasValue || !deletedFolderIdSet.Contains(x.ParentId.Value))
+            .OrderBy(x => x.Name)
+            .Select(x => BuildFolderTree(x, deletedFoldersByParent, deletedFilesByParent, displayNameLookup))
+            .ToArray();
+
+        var rootFiles = deletedFiles
+            .Where(x => !x.ParentFolderId.HasValue || !deletedFolderIdSet.Contains(x.ParentFolderId.Value))
+            .OrderBy(x => x.Name)
+            .Select(x => DtoMappingHelper.MapFile(x, displayNameLookup))
+            .ToArray();
+
+        return DtoMappingHelper.MapFolder(rootFolder, rootFolders, rootFiles, displayNameLookup);
     }
 
     private async Task<IReadOnlyDictionary<Guid, string>> BuildDisplayNameLookupAsync(

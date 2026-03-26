@@ -65,6 +65,20 @@ public class FilesController : ControllerBase
         return NoContent();
     }
 
+    [HttpPost("{id:guid}/restore")]
+    public async Task<IActionResult> Restore(Guid id, CancellationToken cancellationToken)
+    {
+        await _fileService.RestoreFileAsync(id, cancellationToken);
+        return NoContent();
+    }
+
+    [HttpDelete("{id:guid}/permanent")]
+    public async Task<IActionResult> DeletePermanently(Guid id, CancellationToken cancellationToken)
+    {
+        await _fileService.DeleteFilePermanentlyAsync(id, cancellationToken);
+        return NoContent();
+    }
+
     [HttpPut]
     public async Task<ActionResult<FileItemViewDto>> Update([FromBody] ReqGuidNameDto request, CancellationToken cancellationToken)
     {

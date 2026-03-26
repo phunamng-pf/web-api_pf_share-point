@@ -174,7 +174,61 @@ public class FileService : IFileService
                    ?? throw new FileNotFoundException($"File '{fileId}' not found.");
 
         VerifyUserAccess(file.CreatedByUserId);
-        await _fileRepository.SoftDeleteAsync(fileId, cancellationToken);
+        await _fileRepository.SoftDeleteAsync(fileId, _userContext.UserId, cancellationToken);
+    }
+
+    public async Task RestoreFileAsync(Guid fileId, CancellationToken cancellationToken)
+    {
+        var file = await _fileRepository.GetDeletedByIdAsync(fileId, cancellationToken);
+        if (file is null)
+        {
+            var existingFile = await _fileRepository.GetByIdAsync(fileId, cancellationToken)
+                ?? throw new FileNotFoundException($"File '{fileId}' not found.");
+
+            VerifyUserAccess(existingFile.CreatedByUserId);
+            return;
+        }
+
+        VerifyUserAccess(file.CreatedByUserId);
+
+        if (file.ParentFolderId.HasValue)
+        {
+            var parentFolder = await _folderRepository.GetByIdAsync(file.ParentFolderId.Value, cancellationToken);
+            if (parentFolder is null)
+            {
+                var deletedParent = await _folderRepository.GetDeletedByIdAsync(file.ParentFolderId.Value, cancellationToken)
+                    ?? throw new FileNotFoundException($"Folder '{file.ParentFolderId.Value}' not found.");
+
+                VerifyUserAccess(deletedParent.CreatedByUserId);
+                throw new InvalidOperationException("Cannot restore file while parent folder is deleted.");
+            }
+
+            VerifyUserAccess(parentFolder.CreatedByUserId);
+        }
+
+        await _fileRepository.RestoreAsync(fileId, _userContext.UserId, cancellationToken);
+    }
+
+    public async Task DeleteFilePermanentlyAsync(Guid fileId, CancellationToken cancellationToken)
+    {
+        var file = await _fileRepository.GetDeletedByIdAsync(fileId, cancellationToken);
+        if (file is null)
+        {
+            var existingFile = await _fileRepository.GetByIdAsync(fileId, cancellationToken)
+                ?? throw new FileNotFoundException($"File '{fileId}' not found.");
+
+            VerifyUserAccess(existingFile.CreatedByUserId);
+            throw new InvalidOperationException("File must be soft-deleted before permanent deletion.");
+        }
+
+        VerifyUserAccess(file.CreatedByUserId);
+
+        if (!string.IsNullOrWhiteSpace(file.StoragePath))
+        {
+            await _fileStorage.DeleteAsync(file.StoragePath, cancellationToken);
+        }
+
+        await _fileRepository.DeletePermanentlyAsync(fileId, cancellationToken);
     }
 
     /// <summary>

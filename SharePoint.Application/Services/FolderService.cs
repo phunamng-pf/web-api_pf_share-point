@@ -123,7 +123,66 @@ public class FolderService : IFolderService
                      ?? throw new FileNotFoundException($"Folder '{folderId}' not found.");
 
         VerifyUserAccess(folder.CreatedByUserId);
-        await _folderRepository.SoftDeleteAsync(folderId, cancellationToken);
+        await SoftDeleteFolderTreeAsync(folderId, cancellationToken);
+    }
+
+    public async Task RestoreFolderAsync(Guid folderId, CancellationToken cancellationToken)
+    {
+        if (folderId == RootFolderId)
+        {
+            throw new InvalidOperationException("Root folder cannot be restored.");
+        }
+
+        var folder = await _folderRepository.GetDeletedByIdAsync(folderId, cancellationToken);
+        if (folder is null)
+        {
+            var existingFolder = await _folderRepository.GetByIdAsync(folderId, cancellationToken)
+                ?? throw new FileNotFoundException($"Folder '{folderId}' not found.");
+
+            VerifyUserAccess(existingFolder.CreatedByUserId);
+            return;
+        }
+
+        VerifyUserAccess(folder.CreatedByUserId);
+
+        if (folder.ParentId.HasValue && folder.ParentId.Value != RootFolderId)
+        {
+            var parentFolder = await _folderRepository.GetByIdAsync(folder.ParentId.Value, cancellationToken);
+            if (parentFolder is null)
+            {
+                var deletedParent = await _folderRepository.GetDeletedByIdAsync(folder.ParentId.Value, cancellationToken)
+                    ?? throw new FileNotFoundException($"Folder '{folder.ParentId.Value}' not found.");
+
+                VerifyUserAccess(deletedParent.CreatedByUserId);
+                throw new InvalidOperationException("Cannot restore folder while parent folder is deleted.");
+            }
+
+            VerifyUserAccess(parentFolder.CreatedByUserId);
+        }
+
+        await RestoreFolderTreeAsync(folderId, cancellationToken);
+    }
+
+    public async Task DeleteFolderPermanentlyAsync(Guid folderId, CancellationToken cancellationToken)
+    {
+        if (folderId == RootFolderId)
+        {
+            throw new InvalidOperationException("Root folder cannot be permanently deleted.");
+        }
+
+        var folder = await _folderRepository.GetDeletedByIdAsync(folderId, cancellationToken);
+        if (folder is null)
+        {
+            var existingFolder = await _folderRepository.GetByIdAsync(folderId, cancellationToken)
+                ?? throw new FileNotFoundException($"Folder '{folderId}' not found.");
+
+            VerifyUserAccess(existingFolder.CreatedByUserId);
+            throw new InvalidOperationException("Folder must be soft-deleted before permanent deletion.");
+        }
+
+        VerifyUserAccess(folder.CreatedByUserId);
+
+        await DeleteFolderTreePermanentlyAsync(folderId, cancellationToken);
     }
 
     public async Task<IReadOnlyCollection<BreadcrumbInfoDto>> GetBreadcrumbAsync(Guid folderId, CancellationToken cancellationToken)
@@ -227,6 +286,93 @@ public class FolderService : IFolderService
             var newPath = $"{currentPath}/{folder.Name}";
             await AddFolderToZipAsync(archive, folder.Id, newPath, cancellationToken);
         }
+    }
+
+    private async Task SoftDeleteFolderTreeAsync(Guid folderId, CancellationToken cancellationToken)
+    {
+        var activeChildren = await _folderRepository.GetChildrenAsync(folderId, cancellationToken);
+        var deletedChildren = await _folderRepository.GetDeletedChildrenAsync(folderId, cancellationToken);
+        var children = activeChildren.Concat(deletedChildren)
+            .GroupBy(x => x.Id)
+            .Select(x => x.First())
+            .ToArray();
+
+        foreach (var child in children)
+        {
+            VerifyUserAccess(child.CreatedByUserId);
+            await SoftDeleteFolderTreeAsync(child.Id, cancellationToken);
+        }
+
+        var activeFiles = await _fileRepository.GetByFolderAsync(folderId, cancellationToken);
+        var deletedFiles = await _fileRepository.GetDeletedByFolderAsync(folderId, cancellationToken);
+        var files = activeFiles.Concat(deletedFiles)
+            .GroupBy(x => x.Id)
+            .Select(x => x.First())
+            .ToArray();
+
+        foreach (var file in files)
+        {
+            VerifyUserAccess(file.CreatedByUserId);
+            await _fileRepository.SoftDeleteAsync(file.Id, _userContext.UserId, cancellationToken);
+        }
+
+        await _folderRepository.SoftDeleteAsync(folderId, _userContext.UserId, cancellationToken);
+    }
+
+    private async Task RestoreFolderTreeAsync(Guid folderId, CancellationToken cancellationToken)
+    {
+        await _folderRepository.RestoreAsync(folderId, _userContext.UserId, cancellationToken);
+
+        var files = await _fileRepository.GetDeletedByFolderAsync(folderId, cancellationToken);
+        foreach (var file in files)
+        {
+            VerifyUserAccess(file.CreatedByUserId);
+            await _fileRepository.RestoreAsync(file.Id, _userContext.UserId, cancellationToken);
+        }
+
+        var children = await _folderRepository.GetDeletedChildrenAsync(folderId, cancellationToken);
+        foreach (var child in children)
+        {
+            VerifyUserAccess(child.CreatedByUserId);
+            await RestoreFolderTreeAsync(child.Id, cancellationToken);
+        }
+    }
+
+    private async Task DeleteFolderTreePermanentlyAsync(Guid folderId, CancellationToken cancellationToken)
+    {
+        var activeChildren = await _folderRepository.GetChildrenAsync(folderId, cancellationToken);
+        var deletedChildren = await _folderRepository.GetDeletedChildrenAsync(folderId, cancellationToken);
+        var children = activeChildren.Concat(deletedChildren)
+            .GroupBy(x => x.Id)
+            .Select(x => x.First())
+            .ToArray();
+
+        foreach (var child in children)
+        {
+            VerifyUserAccess(child.CreatedByUserId);
+            await DeleteFolderTreePermanentlyAsync(child.Id, cancellationToken);
+        }
+
+        var activeFiles = await _fileRepository.GetByFolderAsync(folderId, cancellationToken);
+        var deletedFiles = await _fileRepository.GetDeletedByFolderAsync(folderId, cancellationToken);
+        var files = activeFiles.Concat(deletedFiles)
+            .GroupBy(x => x.Id)
+            .Select(x => x.First())
+            .ToArray();
+
+        foreach (var file in files)
+        {
+            VerifyUserAccess(file.CreatedByUserId);
+
+            if (!string.IsNullOrWhiteSpace(file.StoragePath))
+            {
+                await _fileStorage.DeleteAsync(file.StoragePath, cancellationToken);
+            }
+
+            await _fileRepository.DeletePermanentlyAsync(file.Id, cancellationToken);
+        }
+
+        await _folderRepository.DeletePermanentlyAsync(folderId, cancellationToken);
     }
 
     /// <summary>
