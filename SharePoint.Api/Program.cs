@@ -40,9 +40,22 @@ builder.Services.AddSwaggerGen(options =>
     });
 });
 
+
 builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddMicrosoftIdentityWebApi(builder.Configuration.GetSection("AzureAd"));
+
+builder.Services.Configure<Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerOptions>(
+    Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerDefaults.AuthenticationScheme,
+    options =>
+    {
+        options.Events ??= new Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerEvents();
+        options.Events.OnTokenValidated = async context =>
+        {
+            var syncService = context.HttpContext.RequestServices.GetRequiredService<SharePoint.Application.Abstractions.IAzureAdUserSyncService>();
+            await syncService.EnsureUserAsync(context.Principal!, context.HttpContext.RequestAborted);
+        };
+    });
 
 builder.Services.AddAuthorization();
 

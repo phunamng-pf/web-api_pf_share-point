@@ -6,6 +6,8 @@ namespace SharePoint.Application.Services;
 
 public class AzureAdUserSyncService : IAzureAdUserSyncService
 {
+    private static readonly TimeSpan LastLoginUpdateInterval = TimeSpan.FromMinutes(15);
+
     private readonly IUserRepository _userRepository;
 
     public AzureAdUserSyncService(IUserRepository userRepository)
@@ -15,29 +17,53 @@ public class AzureAdUserSyncService : IAzureAdUserSyncService
 
     public async Task<AppUser> EnsureUserAsync(ClaimsPrincipal principal, CancellationToken cancellationToken)
     {
-        var objectId = principal.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value 
+
+        var objectId = principal.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
             ?? throw new UnauthorizedAccessException("Missing oid claim.");
 
-        var tenantId = principal.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value 
+        var tenantId = principal.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value
             ?? string.Empty;
 
-        var email = principal.FindFirst(ClaimTypes.Email)?.Value 
+        var email = principal.FindFirst(ClaimTypes.Email)?.Value
             ?? "unknown@local";
 
-        var displayName = principal.FindFirst("name")?.Value 
+        var displayName = principal.FindFirst("name")?.Value
             ?? email;
+
+        // Use auth_time claim if present for LastLoginAt
+        var authTime = principal.FindFirst("auth_time")?.Value;
+        DateTime lastLogin = DateTime.UtcNow;
+        if (long.TryParse(authTime, out var seconds))
+        {
+            lastLogin = DateTimeOffset.FromUnixTimeSeconds(seconds).UtcDateTime;
+        }
 
         var existing = await _userRepository.GetByAzureAdObjectIdAsync(objectId, cancellationToken);
 
         if (existing is not null)
         {
-            existing.LastLoginAt = DateTime.UtcNow;
-            existing.Email = email;
-            existing.DisplayName = displayName;
-            existing.TenantId = tenantId;
-            existing.ModifiedAt = DateTime.UtcNow;
-
-            await _userRepository.UpdateAsync(existing, cancellationToken);
+            bool changed = false;
+            if (!string.Equals(existing.Email, email, StringComparison.OrdinalIgnoreCase))
+            {
+                existing.Email = email;
+                changed = true;
+            }
+            if (!string.Equals(existing.DisplayName, displayName, StringComparison.Ordinal))
+            {
+                existing.DisplayName = displayName;
+                changed = true;
+            }
+            if (!string.Equals(existing.TenantId, tenantId, StringComparison.OrdinalIgnoreCase))
+            {
+                existing.TenantId = tenantId;
+                changed = true;
+            }
+            if (changed || existing.LastLoginAt != lastLogin)
+            {
+                existing.LastLoginAt = lastLogin;
+                existing.ModifiedAt = DateTime.UtcNow;
+                await _userRepository.UpdateAsync(existing, cancellationToken);
+            }
             return existing;
         }
 

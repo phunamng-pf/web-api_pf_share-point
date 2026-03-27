@@ -12,12 +12,17 @@ public class AzureAdUserSyncMiddleware
         _next = next;
     }
 
-    public async Task InvokeAsync(HttpContext context, IAzureAdUserSyncService userSyncService)
+    public async Task InvokeAsync(HttpContext context)
     {
         if (context.User.Identity?.IsAuthenticated == true)
         {
-            var user = await userSyncService.EnsureUserAsync(context.User, context.RequestAborted);
-            context.Items[HttpUserContext.UserItemKey] = user;
+            var objectId = context.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
+            if (!string.IsNullOrEmpty(objectId))
+            {
+                var userRepository = context.RequestServices.GetRequiredService<SharePoint.Application.Abstractions.IUserRepository>();
+                var user = await userRepository.GetByAzureAdObjectIdAsync(objectId, context.RequestAborted);
+                context.Items[HttpUserContext.UserItemKey] = user;
+            }
         }
 
         await _next(context);
