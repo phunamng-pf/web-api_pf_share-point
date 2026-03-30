@@ -8,7 +8,6 @@ public interface IFolderService
 {
     Task<FolderTreeDto> CreateFolderAsync(ReqCreateFolderDto request, CancellationToken cancellationToken);
     Task<FolderTreeDto> GetFolderByIdAsync(Guid folderId, CancellationToken cancellationToken);
-    Task<IReadOnlyCollection<FolderTreeDto>> GetFoldersAsync(Guid? parentId, CancellationToken cancellationToken);
     Task<FolderTreeDto> UpdateFolderAsync(ReqGuidNameDto request, CancellationToken cancellationToken);
     Task DeleteFolderAsync(Guid folderId, CancellationToken cancellationToken);
     Task RestoreFolderAsync(Guid folderId, CancellationToken cancellationToken);

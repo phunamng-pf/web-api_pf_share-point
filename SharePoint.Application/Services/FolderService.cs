@@ -54,7 +54,7 @@ public class FolderService : IFolderService
         };
 
         var saved = await _folderRepository.AddAsync(folder, cancellationToken);
-        var displayNameLookup = await BuildDisplayNameLookupAsync(new[] { saved }, Array.Empty<Domain.Entities.FileItem>(), cancellationToken);
+        var displayNameLookup = await BuildDisplayNameLookupAsync(new[] { saved }, Array.Empty<FileItem>(), cancellationToken);
         return DtoMappingHelper.MapFolder(saved, Array.Empty<FolderTreeDto>(), Array.Empty<FileItemViewDto>(), displayNameLookup);
     }
 
@@ -68,22 +68,6 @@ public class FolderService : IFolderService
 
         var displayNameLookup = await BuildDisplayNameLookupAsync(folders, files, cancellationToken);
         return BuildFolderTree(targetFolder, folders, files, displayNameLookup);
-    }
-
-    public async Task<IReadOnlyCollection<FolderTreeDto>> GetFoldersAsync(Guid? parentId, CancellationToken cancellationToken)
-    {
-        var normalizedParentId = DtoMappingHelper.NormalizeParentFolderId(parentId);
-        var allFolders = await _folderRepository.GetByUserAsync(_userContext.UserId, cancellationToken);
-
-        if (allFolders.All(x => x.Id != normalizedParentId))
-        {
-            throw new FileNotFoundException($"Folder '{normalizedParentId}' not found.");
-        }
-
-        var folders = allFolders.Where(x => x.ParentId == normalizedParentId).OrderBy(x => x.Name).ToArray();
-        var displayNameLookup = await BuildDisplayNameLookupAsync(folders, Array.Empty<Domain.Entities.FileItem>(), cancellationToken);
-
-        return folders.Select(f => DtoMappingHelper.MapFolder(f, Array.Empty<FolderTreeDto>(), Array.Empty<FileItemViewDto>(), displayNameLookup)).ToArray();
     }
 
     public async Task<FolderTreeDto> UpdateFolderAsync(ReqGuidNameDto request, CancellationToken cancellationToken)
@@ -100,8 +84,6 @@ public class FolderService : IFolderService
 
         var folder = await _folderRepository.GetByIdAsync(request.Id, cancellationToken)
             ?? throw new FileNotFoundException($"Folder '{request.Id}' not found.");
-
-        VerifyUserAccess(folder.CreatedByUserId);
 
         folder.Name = request.Name.Trim();
         folder.ModifiedAt = DateTime.UtcNow;
@@ -121,8 +103,6 @@ public class FolderService : IFolderService
 
         var folder = await _folderRepository.GetByIdAsync(folderId, cancellationToken)
                      ?? throw new FileNotFoundException($"Folder '{folderId}' not found.");
-
-        VerifyUserAccess(folder.CreatedByUserId);
         await SoftDeleteFolderTreeAsync(folderId, cancellationToken);
     }
 
@@ -138,12 +118,8 @@ public class FolderService : IFolderService
         {
             var existingFolder = await _folderRepository.GetByIdAsync(folderId, cancellationToken)
                 ?? throw new FileNotFoundException($"Folder '{folderId}' not found.");
-
-            VerifyUserAccess(existingFolder.CreatedByUserId);
             return;
         }
-
-        VerifyUserAccess(folder.CreatedByUserId);
 
         if (folder.ParentId.HasValue && folder.ParentId.Value != RootFolderId)
         {
@@ -152,12 +128,8 @@ public class FolderService : IFolderService
             {
                 var deletedParent = await _folderRepository.GetDeletedByIdAsync(folder.ParentId.Value, cancellationToken)
                     ?? throw new FileNotFoundException($"Folder '{folder.ParentId.Value}' not found.");
-
-                VerifyUserAccess(deletedParent.CreatedByUserId);
                 throw new InvalidOperationException("Cannot restore folder while parent folder is deleted.");
             }
-
-            VerifyUserAccess(parentFolder.CreatedByUserId);
         }
 
         await RestoreFolderTreeAsync(folderId, cancellationToken);
@@ -176,11 +148,8 @@ public class FolderService : IFolderService
             var existingFolder = await _folderRepository.GetByIdAsync(folderId, cancellationToken)
                 ?? throw new FileNotFoundException($"Folder '{folderId}' not found.");
 
-            VerifyUserAccess(existingFolder.CreatedByUserId);
             throw new InvalidOperationException("Folder must be soft-deleted before permanent deletion.");
         }
-
-        VerifyUserAccess(folder.CreatedByUserId);
 
         await DeleteFolderTreePermanentlyAsync(folderId, cancellationToken);
     }
@@ -244,8 +213,6 @@ public class FolderService : IFolderService
         var folder = await _folderRepository.GetByIdAsync(folderId, cancellationToken)
                      ?? throw new DirectoryNotFoundException($"Folder '{folderId}' not found.");
 
-        VerifyUserAccess(folder.CreatedByUserId);
-
         var memoryStream = new MemoryStream();
 
         using (var archive = new ZipArchive(memoryStream, ZipArchiveMode.Create, true))
@@ -264,8 +231,6 @@ public class FolderService : IFolderService
 
         foreach (var file in files)
         {
-            VerifyUserAccess(file.CreatedByUserId);
-
             var fileStream = await _fileStorage.OpenReadAsync(file.StoragePath, cancellationToken);
             if (fileStream == null) continue;
 
@@ -281,8 +246,6 @@ public class FolderService : IFolderService
 
         foreach (var folder in subFolders)
         {
-            VerifyUserAccess(folder.CreatedByUserId);
-
             var newPath = $"{currentPath}/{folder.Name}";
             await AddFolderToZipAsync(archive, folder.Id, newPath, cancellationToken);
         }
@@ -299,7 +262,6 @@ public class FolderService : IFolderService
 
         foreach (var child in children)
         {
-            VerifyUserAccess(child.CreatedByUserId);
             await SoftDeleteFolderTreeAsync(child.Id, cancellationToken);
         }
 
@@ -312,7 +274,6 @@ public class FolderService : IFolderService
 
         foreach (var file in files)
         {
-            VerifyUserAccess(file.CreatedByUserId);
             await _fileRepository.SoftDeleteAsync(file.Id, _userContext.UserId, cancellationToken);
         }
 
@@ -326,14 +287,12 @@ public class FolderService : IFolderService
         var files = await _fileRepository.GetDeletedByFolderAsync(folderId, cancellationToken);
         foreach (var file in files)
         {
-            VerifyUserAccess(file.CreatedByUserId);
             await _fileRepository.RestoreAsync(file.Id, _userContext.UserId, cancellationToken);
         }
 
         var children = await _folderRepository.GetDeletedChildrenAsync(folderId, cancellationToken);
         foreach (var child in children)
         {
-            VerifyUserAccess(child.CreatedByUserId);
             await RestoreFolderTreeAsync(child.Id, cancellationToken);
         }
     }
@@ -349,7 +308,6 @@ public class FolderService : IFolderService
 
         foreach (var child in children)
         {
-            VerifyUserAccess(child.CreatedByUserId);
             await DeleteFolderTreePermanentlyAsync(child.Id, cancellationToken);
         }
 
@@ -362,8 +320,6 @@ public class FolderService : IFolderService
 
         foreach (var file in files)
         {
-            VerifyUserAccess(file.CreatedByUserId);
-
             if (!string.IsNullOrWhiteSpace(file.StoragePath))
             {
                 await _fileStorage.DeleteAsync(file.StoragePath, cancellationToken);
@@ -378,10 +334,8 @@ public class FolderService : IFolderService
     /// <summary>
     /// Validates that the parent folder exists and that the current user has access to it.
     /// </summary>
-    private async Task ValidateParentFolderAccessAsync(Guid? parentFolderId, CancellationToken cancellationToken)
+    private async Task ValidateParentFolderAccessAsync(Guid normalizedParentFolderId, CancellationToken cancellationToken)
     {
-        var normalizedParentFolderId = DtoMappingHelper.NormalizeParentFolderId(parentFolderId);
-
         if (normalizedParentFolderId == RootFolderId)
         {
             return;
@@ -389,19 +343,6 @@ public class FolderService : IFolderService
 
         var parentFolder = await _folderRepository.GetByIdAsync(normalizedParentFolderId, cancellationToken)
                            ?? throw new FileNotFoundException($"Folder '{normalizedParentFolderId}' not found.");
-
-        VerifyUserAccess(parentFolder.CreatedByUserId);
-    }
-    /// <summary>
-    /// Verifies that the resource owner (createdByUserId) matches the current user.
-    /// Throws UnauthorizedAccessException if access is denied.
-    /// </summary>
-    private void VerifyUserAccess(Guid createdByUserId)
-    {
-        if (createdByUserId != _userContext.UserId)
-        {
-            throw new UnauthorizedAccessException("You do not have permission to access this resource.");
-        }
     }
 
     private FolderTreeDto BuildFolderTree(
@@ -436,7 +377,7 @@ public class FolderService : IFolderService
 
     private async Task<IReadOnlyDictionary<Guid, string>> BuildDisplayNameLookupAsync(
         IEnumerable<Folder> folders,
-        IEnumerable<Domain.Entities.FileItem> files,
+        IEnumerable<FileItem> files,
         CancellationToken cancellationToken)
     {
         var userIds = new HashSet<Guid>();

@@ -132,8 +132,6 @@ public class FileService : IFileService
         var file = await _fileRepository.GetByIdAsync(request.Id, cancellationToken)
             ?? throw new FileNotFoundException($"File '{request.Id}' not found.");
 
-        VerifyUserAccess(file.CreatedByUserId);
-
         file.Name = request.Name.Trim();
         file.ModifiedAt = DateTime.UtcNow;
         file.ModifiedByUserId = _userContext.UserId;
@@ -158,8 +156,6 @@ public class FileService : IFileService
         var file = await _fileRepository.GetByIdAsync(fileId, cancellationToken)
                    ?? throw new FileNotFoundException($"File '{fileId}' not found.");
 
-        VerifyUserAccess(file.CreatedByUserId);
-
         var stream = await _fileStorage.OpenReadAsync(file.StoragePath, cancellationToken)
                      ?? throw new FileNotFoundException($"Storage path '{file.StoragePath}' not found.");
 
@@ -173,7 +169,6 @@ public class FileService : IFileService
         var file = await _fileRepository.GetByIdAsync(fileId, cancellationToken)
                    ?? throw new FileNotFoundException($"File '{fileId}' not found.");
 
-        VerifyUserAccess(file.CreatedByUserId);
         await _fileRepository.SoftDeleteAsync(fileId, _userContext.UserId, cancellationToken);
     }
 
@@ -182,28 +177,16 @@ public class FileService : IFileService
         var file = await _fileRepository.GetDeletedByIdAsync(fileId, cancellationToken);
         if (file is null)
         {
-            var existingFile = await _fileRepository.GetByIdAsync(fileId, cancellationToken)
-                ?? throw new FileNotFoundException($"File '{fileId}' not found.");
-
-            VerifyUserAccess(existingFile.CreatedByUserId);
             return;
         }
-
-        VerifyUserAccess(file.CreatedByUserId);
 
         if (file.ParentFolderId.HasValue)
         {
             var parentFolder = await _folderRepository.GetByIdAsync(file.ParentFolderId.Value, cancellationToken);
             if (parentFolder is null)
             {
-                var deletedParent = await _folderRepository.GetDeletedByIdAsync(file.ParentFolderId.Value, cancellationToken)
-                    ?? throw new FileNotFoundException($"Folder '{file.ParentFolderId.Value}' not found.");
-
-                VerifyUserAccess(deletedParent.CreatedByUserId);
                 throw new InvalidOperationException("Cannot restore file while parent folder is deleted.");
             }
-
-            VerifyUserAccess(parentFolder.CreatedByUserId);
         }
 
         await _fileRepository.RestoreAsync(fileId, _userContext.UserId, cancellationToken);
@@ -214,14 +197,8 @@ public class FileService : IFileService
         var file = await _fileRepository.GetDeletedByIdAsync(fileId, cancellationToken);
         if (file is null)
         {
-            var existingFile = await _fileRepository.GetByIdAsync(fileId, cancellationToken)
-                ?? throw new FileNotFoundException($"File '{fileId}' not found.");
-
-            VerifyUserAccess(existingFile.CreatedByUserId);
             throw new InvalidOperationException("File must be soft-deleted before permanent deletion.");
         }
-
-        VerifyUserAccess(file.CreatedByUserId);
 
         if (!string.IsNullOrWhiteSpace(file.StoragePath))
         {
@@ -234,10 +211,8 @@ public class FileService : IFileService
     /// <summary>
     /// Validates that the parent folder exists and that the current user has access to it.
     /// </summary>
-    private async Task ValidateParentFolderAccessAsync(Guid? parentFolderId, CancellationToken cancellationToken)
+    private async Task ValidateParentFolderAccessAsync(Guid normalizedParentFolderId, CancellationToken cancellationToken)
     {
-        var normalizedParentFolderId = NormalizeParentFolderId(parentFolderId);
-
         if (normalizedParentFolderId == RootFolderId)
         {
             return;
@@ -245,25 +220,11 @@ public class FileService : IFileService
 
         var parentFolder = await _folderRepository.GetByIdAsync(normalizedParentFolderId, cancellationToken)
                            ?? throw new FileNotFoundException($"Folder '{normalizedParentFolderId}' not found.");
-
-        VerifyUserAccess(parentFolder.CreatedByUserId);
     }
 
     private static Guid NormalizeParentFolderId(Guid? parentFolderId)
     {
         return parentFolderId ?? RootFolderId;
-    }
-
-    /// <summary>
-    /// Verifies that the resource owner (createdByUserId) matches the current user.
-    /// Throws UnauthorizedAccessException if access is denied.
-    /// </summary>
-    private void VerifyUserAccess(Guid createdByUserId)
-    {
-        if (createdByUserId != _userContext.UserId)
-        {
-            throw new UnauthorizedAccessException("You do not have permission to access this resource.");
-        }
     }
 
     private async Task<IReadOnlyDictionary<Guid, string>> BuildDisplayNameLookupAsync(
